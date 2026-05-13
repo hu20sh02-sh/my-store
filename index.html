@@ -18,16 +18,16 @@ input:focus,select:focus,textarea:focus{outline:2px solid #6c63ff;}
 <body>
 <div id="root"></div>
 <script type="text/babel">
-const {useState,useEffect,useCallback}=React;
+const {useState,useEffect,useCallback,useRef}=React;
 
 const API="https://script.google.com/macros/s/AKfycbwgpvKIS5nK3j8c1ATj7OalqvAiij9mxjP9KrT-kSUBnuhG0rQFnlc-zheqQumei2BR/exec";
 const STORE_NAME="متجر الفيب والشيشة";
 const CATS=["جهاز فيب","سائل إلكتروني","شيشة","معسل","فحم","إكسسوارات","أخرى"];
 
 const ROLES={
-  admin:{label:"مدير",color:"#6c63ff",defaultPerms:["dashboard","inventory","addProduct","sales","purchases","reports","accounts","notes","users"]},
-  accountant:{label:"محاسب",color:"#22c55e",defaultPerms:["dashboard","accounts","reports","sales"]},
-  warehouse:{label:"موظف مخزن",color:"#f59e0b",defaultPerms:["dashboard","inventory","addProduct"]},
+  admin:{label:"مدير",color:"#6c63ff",defaultPerms:["dashboard","inventory","addProduct","sales","purchases","reports","accounts","notes","users","debts","suppliers","expenses","returns","dailyReport"]},
+  accountant:{label:"محاسب",color:"#22c55e",defaultPerms:["dashboard","accounts","reports","sales","dailyReport","expenses"]},
+  warehouse:{label:"موظف مخزن",color:"#f59e0b",defaultPerms:["dashboard","inventory","addProduct","returns"]},
   staff:{label:"موظف",color:"#8b8fa8",defaultPerms:["dashboard","inventory","sales"]},
 };
 
@@ -36,16 +36,27 @@ const ALL_PAGES=[
   {k:"inventory",l:"📦 المخزن"},
   {k:"addProduct",l:"➕ إضافة مادة"},
   {k:"sales",l:"📊 سجل المبيعات"},
+  {k:"dailyReport",l:"📅 تقرير يومي"},
+  {k:"debts",l:"💳 الديون"},
+  {k:"suppliers",l:"🏭 الموردون"},
+  {k:"expenses",l:"💸 المصروفات"},
+  {k:"returns",l:"↩️ الطلبات الراجعة"},
   {k:"purchases",l:"🛒 قائمة الشراء"},
   {k:"reports",l:"📈 التقارير"},
   {k:"accounts",l:"💰 الحسابات"},
   {k:"notes",l:"📝 ملاحظات"},
   {k:"users",l:"👥 المستخدمون"},
+  {k:"backup",l:"💾 النسخ الاحتياطي"},
 ];
 
 const DEFAULT_ADMIN={id:"1",name:"المدير",phone:"07700000000",password:"admin123",role:"admin",status:"approved",perms:ROLES.admin.defaultPerms};
-function getUsers(){try{return JSON.parse(localStorage.getItem("vape_users")||JSON.stringify([DEFAULT_ADMIN]));}catch{return[DEFAULT_ADMIN];}}
-function saveUsers(u){localStorage.setItem("vape_users",JSON.stringify(u));}
+
+// ── حفظ واسترجاع محلي ──────────────────────────────────
+function ls(key,def){try{const v=localStorage.getItem(key);return v?JSON.parse(v):def;}catch{return def;}}
+function ss(key,val){try{localStorage.setItem(key,JSON.stringify(val));}catch{}}
+
+function getUsers(){return ls("vape_users",[DEFAULT_ADMIN]);}
+function saveUsers(u){ss("vape_users",u);}
 
 const THEMES={
   dark:{name:"🌙 داكن",bg:"#0f1117",card:"#1a1d27",border:"#2a2d3a",text:"#e8eaf0",sub:"#8b8fa8",accent:"#6c63ff",accentText:"#fff",green:"#22c55e",greenBg:"rgba(34,197,94,0.12)",red:"#ef4444",redBg:"rgba(239,68,68,0.12)",amber:"#f59e0b",amberBg:"rgba(245,158,11,0.12)",input:"#12151f",statBg:"#12151f",sidebar:"#13151f",sidebarBorder:"#22253a",sellBtn:"#22c55e",sellBtnTxt:"#fff"},
@@ -53,21 +64,33 @@ const THEMES={
   gold:{name:"✨ ذهبي",bg:"#1a1400",card:"#221c00",border:"#3d3200",text:"#ffe98a",sub:"#9e8c4a",accent:"#f5c518",accentText:"#000",green:"#a3e635",greenBg:"rgba(163,230,53,0.12)",red:"#f87171",redBg:"rgba(248,113,113,0.12)",amber:"#fb923c",amberBg:"rgba(251,146,60,0.12)",input:"#120f00",statBg:"#120f00",sidebar:"#120f00",sidebarBorder:"#3d3200",sellBtn:"#f5c518",sellBtnTxt:"#000"},
 };
 
-async function api(params){try{const r=await fetch(API+"?"+new URLSearchParams(params));return r.json();}catch{return{ok:false};}}
-async function apiPost(body){try{const r=await fetch(API,{method:"POST",body:JSON.stringify(body)});return r.json();}catch{return{ok:false};}}
+async function api(p){try{const r=await fetch(API+"?"+new URLSearchParams(p));return r.json();}catch{return{ok:false};}}
+async function apiPost(b){try{const r=await fetch(API,{method:"POST",body:JSON.stringify(b)});return r.json();}catch{return{ok:false};}}
 
-const emptyForm={name:"",category:CATS[0],buyPrice:"",sellPrice:"",quantity:"",sku:""};
-const emptyCust={name:"",phone:"",note:""};
+const emptyForm={name:"",category:CATS[0],buyPrice:"",sellPrice:"",quantity:"",sku:"",image:""};
+const emptyCust={name:"",phone:"",note:"",payType:"cash"};
 const emptyPO={supplierName:"",date:new Date().toLocaleDateString("ar-IQ"),notes:"",discount:"0",items:[{name:"",qty:"1",price:""}]};
+const emptyDebt={customerName:"",phone:"",amount:"",note:"",date:new Date().toLocaleDateString("ar-IQ"),status:"unpaid"};
+const emptySupplier={name:"",phone:"",address:"",notes:""};
+const emptyExpense={title:"",amount:"",category:"عام",date:new Date().toLocaleDateString("ar-IQ"),notes:""};
+const emptyReturn={productName:"",qty:"1",reason:"",date:new Date().toLocaleDateString("ar-IQ"),customerName:"",refundAmount:"",status:"pending"};
+const EXPENSE_CATS=["عام","إيجار","رواتب","كهرباء","مياه","إنترنت","صيانة","نقل","أخرى"];
 
 function App(){
-  const[user,setUser]=useState(()=>{try{const u=localStorage.getItem("vape_session");return u?JSON.parse(u):null;}catch{return null;}});
-  const[screen,setScreen]=useState(()=>localStorage.getItem("vape_session")?"main":"login");
+  const[user,setUser]=useState(()=>ls("vape_session",null));
+  const[screen,setScreen]=useState(()=>ls("vape_session",null)?"main":"login");
   const[themeName,setThemeName]=useState(()=>localStorage.getItem("vape_theme")||"dark");
-  const[products,setProducts]=useState([]);
-  const[sales,setSales]=useState([]);
-  const[notes,setNotes]=useState("");
-  const[loading,setLoading]=useState(true);
+  // البيانات — تُحفظ محلياً دائماً
+  const[products,setProductsRaw]=useState(()=>ls("vape_products",[]));
+  const[sales,setSalesRaw]=useState(()=>ls("vape_sales",[]));
+  const[notes,setNotesRaw]=useState(()=>ls("vape_notes",""));
+  const[debts,setDebtsRaw]=useState(()=>ls("vape_debts",[]));
+  const[suppliers,setSuppliersRaw]=useState(()=>ls("vape_suppliers",[]));
+  const[expenses,setExpensesRaw]=useState(()=>ls("vape_expenses",[]));
+  const[returns,setReturnsRaw]=useState(()=>ls("vape_returns",[]));
+  const[purchaseOrders,setPORaw]=useState(()=>ls("vape_po",[]));
+  const[users,setUsersRaw]=useState(getUsers);
+  const[loading,setLoading]=useState(false);
   const[saving,setSaving]=useState("");
   const[page,setPage]=useState("dashboard");
   const[search,setSearch]=useState("");
@@ -83,43 +106,69 @@ function App(){
   const[salesSearch,setSalesSearch]=useState("");
   const[expandedSale,setExpandedSale]=useState(null);
   const[po,setPo]=useState(emptyPO);
-  const[purchaseOrders,setPurchaseOrders]=useState(()=>{try{return JSON.parse(localStorage.getItem("vape_po")||"[]");}catch{return[];}});
   const[printInvoice,setPrintInvoice]=useState(null);
-  const[users,setUsers]=useState(getUsers);
+  const[debtForm,setDebtForm]=useState(emptyDebt);
+  const[supplierForm,setSupplierForm]=useState(emptySupplier);
+  const[expenseForm,setExpenseForm]=useState(emptyExpense);
+  const[returnForm,setReturnForm]=useState(emptyReturn);
+  const[dailyDate,setDailyDate]=useState(new Date().toLocaleDateString("ar-IQ"));
   const T=THEMES[themeName];
 
-  useEffect(()=>{localStorage.setItem("vape_theme",themeName);},[themeName]);
-  useEffect(()=>{localStorage.setItem("vape_po",JSON.stringify(purchaseOrders));},[purchaseOrders]);
-  useEffect(()=>{saveUsers(users);},[users]);
+  // ── وظائف حفظ مع localStorage ──────────────────────
+  function setProducts(v){const d=typeof v==="function"?v(products):v;setProductsRaw(d);ss("vape_products",d);}
+  function setSales(v){const d=typeof v==="function"?v(sales):v;setSalesRaw(d);ss("vape_sales",d);}
+  function setNotes(v){setNotesRaw(v);ss("vape_notes",v);}
+  function setDebts(v){const d=typeof v==="function"?v(debts):v;setDebtsRaw(d);ss("vape_debts",d);}
+  function setSuppliers(v){const d=typeof v==="function"?v(suppliers):v;setSuppliersRaw(d);ss("vape_suppliers",d);}
+  function setExpenses(v){const d=typeof v==="function"?v(expenses):v;setExpensesRaw(d);ss("vape_expenses",d);}
+  function setReturns(v){const d=typeof v==="function"?v(returns):v;setReturnsRaw(d);ss("vape_returns",d);}
+  function setPurchaseOrders(v){const d=typeof v==="function"?v(purchaseOrders):v;setPORaw(d);ss("vape_po",d);}
+  function setUsers(v){const d=typeof v==="function"?v(users):v;setUsersRaw(d);saveUsers(d);}
 
-  const loadAll=useCallback(async()=>{
-    setLoading(true);
-    try{const res=await api({action:"getAll"});if(res&&res.ok){setProducts(res.data.products||[]);setSales(res.data.sales||[]);setNotes(res.data.notes||"");}}catch(e){}
-    setLoading(false);
+  useEffect(()=>{localStorage.setItem("vape_theme",themeName);},[themeName]);
+
+  // مزامنة مع Google Sheets عند الدخول
+  const syncFromAPI=useCallback(async()=>{
+    setLoading(true);setSaving("جاري المزامنة...");
+    try{
+      const res=await api({action:"getAll"});
+      if(res&&res.ok&&res.data){
+        if(res.data.products?.length){setProducts(res.data.products);}
+        if(res.data.sales?.length){setSales(res.data.sales);}
+        if(res.data.notes){setNotes(res.data.notes);}
+      }
+    }catch{}
+    setLoading(false);setSaving("");
   },[]);
 
-  useEffect(()=>{if(user)loadAll();},[user]);
+  useEffect(()=>{if(user)syncFromAPI();},[user]);
 
   const can=(p)=>user?.perms?.includes(p);
   const isAdmin=user?.role==="admin";
 
-  function login(u){setUser(u);localStorage.setItem("vape_session",JSON.stringify(u));setScreen("main");}
+  function login(u){setUser(u);ss("vape_session",u);setScreen("main");}
   function logout(){setUser(null);localStorage.removeItem("vape_session");setScreen("login");setPage("dashboard");}
-  function refreshUser(u){setUser(u);localStorage.setItem("vape_session",JSON.stringify(u));}
+  function refreshUser(u){setUser(u);ss("vape_session",u);}
 
+  // ── قراءة الصورة ───────────────────────────────────
+  function readImage(file,cb){
+    const r=new FileReader();
+    r.onload=e=>cb(e.target.result);
+    r.readAsDataURL(file);
+  }
+
+  // ── إضافة منتج ──────────────────────────────────────
   async function handleAdd(){
     if(!form.name.trim()){setFormErr("يرجى إدخال اسم المنتج");return;}
-    if(form.buyPrice===""||isNaN(+form.buyPrice)||+form.buyPrice<0){setFormErr("يرجى إدخال سعر الشراء");return;}
-    if(form.sellPrice===""||isNaN(+form.sellPrice)||+form.sellPrice<0){setFormErr("يرجى إدخال سعر البيع");return;}
-    if(form.quantity===""||isNaN(+form.quantity)||+form.quantity<0){setFormErr("يرجى إدخال الكمية");return;}
+    if(form.buyPrice===""||+form.buyPrice<0){setFormErr("يرجى إدخال سعر الشراء");return;}
+    if(form.sellPrice===""||+form.sellPrice<0){setFormErr("يرجى إدخال سعر البيع");return;}
+    if(form.quantity===""||+form.quantity<0){setFormErr("يرجى إدخال الكمية");return;}
     setSaving("جاري الحفظ...");
-    const p={name:form.name.trim(),category:form.category,buyPrice:parseFloat(form.buyPrice),sellPrice:parseFloat(form.sellPrice),quantity:parseInt(form.quantity),sku:form.sku.trim(),addedDate:new Date().toLocaleDateString("ar-IQ")};
-    try{
-      const res=await apiPost({action:"saveProduct",product:p});
-      const saved=res&&res.ok&&res.data?res.data:{...p,id:Date.now()};
-      setProducts(prev=>[...prev,saved]);
-      setForm(emptyForm);setFormErr("");setPage("inventory");
-    }catch{const saved={...p,id:Date.now()};setProducts(prev=>[...prev,saved]);setForm(emptyForm);setFormErr("");setPage("inventory");}
+    const p={name:form.name.trim(),category:form.category,buyPrice:parseFloat(form.buyPrice),sellPrice:parseFloat(form.sellPrice),quantity:parseInt(form.quantity),sku:form.sku.trim(),image:form.image||"",addedBy:user.name,addedDate:new Date().toLocaleDateString("ar-IQ")};
+    const res=await apiPost({action:"saveProduct",product:p});
+    const saved=res?.ok&&res.data?res.data:{...p,id:Date.now()};
+    setProducts(prev=>[...prev,saved]);
+    setForm(emptyForm);setFormErr("");setPage("inventory");
     setSaving("");
   }
 
@@ -132,7 +181,7 @@ function App(){
   }
 
   async function deleteProduct(id){
-    if(!confirm("هل تريد حذف هذا المنتج؟"))return;
+    if(!confirm("حذف المنتج؟"))return;
     await apiPost({action:"deleteProduct",id});
     setProducts(prev=>prev.filter(p=>String(p.id)!==String(id)));
   }
@@ -148,18 +197,25 @@ function App(){
     if(!cust.name.trim()){setCustErr("يرجى إدخال اسم الزبون");return;}
     setSaving("جاري تسجيل البيع...");
     const prod=saleModal;
-    const sale={saleId:Date.now(),productId:prod.id,productName:prod.name,category:prod.category,sku:prod.sku||"",qty:saleQty,buyPrice:prod.buyPrice,sellPrice:prod.sellPrice,total:+(prod.sellPrice*saleQty).toFixed(2),profit:+((prod.sellPrice-prod.buyPrice)*saleQty).toFixed(2),customer:cust,soldBy:user.name,date:new Date().toLocaleDateString("ar-IQ"),time:new Date().toLocaleTimeString("ar-IQ",{hour:"2-digit",minute:"2-digit"})};
+    const unitCost=prod.buyPrice||0;
+    const unitSell=prod.sellPrice||0;
+    const sale={saleId:Date.now(),productId:prod.id,productName:prod.name,category:prod.category,sku:prod.sku||"",qty:saleQty,buyPrice:unitCost,sellPrice:unitSell,unitProfit:+(unitSell-unitCost).toFixed(2),total:+(unitSell*saleQty).toFixed(2),totalCost:+(unitCost*saleQty).toFixed(2),profit:+((unitSell-unitCost)*saleQty).toFixed(2),customer:cust,payType:cust.payType,soldBy:user.name,date:new Date().toLocaleDateString("ar-IQ"),time:new Date().toLocaleTimeString("ar-IQ",{hour:"2-digit",minute:"2-digit"})};
     const updatedProd={...prod,quantity:Math.max(0,prod.quantity-saleQty)};
     await apiPost({action:"updateProduct",product:updatedProd});
     await apiPost({action:"saveSale",sale});
     setProducts(prev=>prev.map(p=>String(p.id)===String(prod.id)?updatedProd:p));
     setSales(prev=>[sale,...prev]);
+    // إذا دين أضفه تلقائياً
+    if(cust.payType==="debt"){
+      const d={id:Date.now()+1,customerName:cust.name,phone:cust.phone||"",amount:sale.total,note:"من بيع: "+prod.name,date:sale.date,status:"unpaid"};
+      setDebts(prev=>[d,...prev]);
+    }
     setSaleModal(null);setSaleQty(1);setCust(emptyCust);setCustErr("");
     setPrintInvoice(sale);setSaving("");
   }
 
   async function deleteSale(saleId){
-    if(!confirm("حذف هذا السجل؟"))return;
+    if(!confirm("حذف السجل؟"))return;
     await apiPost({action:"deleteSale",saleId});
     setSales(prev=>prev.filter(s=>String(s.saleId)!==String(saleId)));
   }
@@ -170,6 +226,7 @@ function App(){
     setSaving("تم ✓");setTimeout(()=>setSaving(""),2000);
   }
 
+  // ── تصدير ──────────────────────────────────────────
   function exportExcel(data,filename,headers,keys){
     const ws=XLSX.utils.json_to_sheet(data.map(r=>Object.fromEntries(keys.map((k,i)=>[headers[i],typeof r[k]==="object"?JSON.stringify(r[k]):r[k]]))));
     const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,"data");
@@ -183,24 +240,56 @@ function App(){
   }
 
   function invoiceHTML(sale){
-    return`<h2>${STORE_NAME}</h2><h3>فاتورة مبيعات</h3><p style="text-align:center">${sale.date} · ${sale.time}</p><p style="text-align:center">الزبون: <b>${sale.customer.name}</b>${sale.customer.phone?" | "+sale.customer.phone:""}</p><table><thead><tr><th>المنتج</th><th>الكمية</th><th>سعر البيع</th><th>الإجمالي</th></tr></thead><tbody><tr><td>${sale.productName}</td><td>${sale.qty}</td><td>$${(sale.sellPrice||0).toFixed(2)}</td><td>$${sale.total.toFixed(2)}</td></tr></tbody></table><p class="ttl">المجموع: $${sale.total.toFixed(2)}</p>${sale.customer.note?`<p>ملاحظة: ${sale.customer.note}</p>`:""}`;
+    return`<h2>${STORE_NAME}</h2><h3>فاتورة مبيعات</h3><p style="text-align:center">${sale.date} · ${sale.time}</p><p style="text-align:center">الزبون: <b>${sale.customer.name}</b>${sale.customer.phone?" | "+sale.customer.phone:""}</p><table><thead><tr><th>المنتج</th><th>الكمية</th><th>سعر الشراء</th><th>سعر البيع</th><th>المبلغ الصافي</th></tr></thead><tbody><tr><td>${sale.productName}</td><td>${sale.qty}</td><td>$${(sale.buyPrice||0).toFixed(2)}</td><td>$${(sale.sellPrice||0).toFixed(2)}</td><td>$${sale.total.toFixed(2)}</td></tr></tbody></table><p class="ttl">المجموع الكلي: $${sale.total.toFixed(2)}</p><p>طريقة الدفع: ${sale.payType==="cash"?"نقداً":sale.payType==="debt"?"دين":"بطاقة"}</p>${sale.customer.note?`<p>ملاحظة: ${sale.customer.note}</p>`:""}`;
+  }
+
+  // ── النسخ الاحتياطي ─────────────────────────────────
+  function doBackup(){
+    const data={products,sales,debts,suppliers,expenses,returns,purchaseOrders,notes,backupDate:new Date().toLocaleString("ar-IQ")};
+    const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});
+    const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="backup_"+new Date().toLocaleDateString("ar-IQ").replace(/\//g,"-")+".json";a.click();
+  }
+
+  function doRestore(file){
+    const r=new FileReader();
+    r.onload=e=>{
+      try{
+        const d=JSON.parse(e.target.result);
+        if(d.products){setProducts(d.products);}
+        if(d.sales){setSales(d.sales);}
+        if(d.debts){setDebts(d.debts);}
+        if(d.suppliers){setSuppliers(d.suppliers);}
+        if(d.expenses){setExpenses(d.expenses);}
+        if(d.returns){setReturns(d.returns);}
+        if(d.purchaseOrders){setPurchaseOrders(d.purchaseOrders);}
+        if(d.notes){setNotes(d.notes);}
+        alert("✅ تم استعادة النسخة الاحتياطية بنجاح!");
+      }catch{alert("❌ الملف غير صحيح");}
+    };
+    r.readAsText(file);
+  }
+
+  // ── حساب حجم البيانات ──────────────────────────────
+  function getStorageSize(){
+    let total=0;
+    ["vape_products","vape_sales","vape_debts","vape_suppliers","vape_expenses","vape_returns","vape_po","vape_notes"].forEach(k=>{
+      const v=localStorage.getItem(k)||"";total+=v.length;
+    });
+    return(total/1024).toFixed(2);
   }
 
   const poItemsTotal=po.items.reduce((s,i)=>s+(+i.price||0)*(+i.qty||0),0);
   const poFinal=Math.max(0,poItemsTotal-(+po.discount||0));
-
-  function poHTML(o){
-    const rows=o.items.map(i=>`<tr><td>${i.name}</td><td>${i.qty}</td><td>$${(+i.price).toFixed(2)}</td><td>$${((+i.price)*(+i.qty)).toFixed(2)}</td></tr>`).join("");
-    return`<h2>${STORE_NAME}</h2><h3>قائمة مشتريات</h3><p style="text-align:center">المجهز: ${o.supplierName} | ${o.date}</p><table><thead><tr><th>المادة</th><th>الكمية</th><th>السعر</th><th>الإجمالي</th></tr></thead><tbody>${rows}</tbody></table>${o.notes?`<p>ملاحظات: ${o.notes}</p>`:""}<p class="ttl">الإجمالي: $${(o.itemsTotal||0).toFixed(2)} | خصم: $${(+o.discount||0).toFixed(2)} | الصافي: $${(o.total||0).toFixed(2)}</p>`;
-  }
-
   const filtered=products.filter(p=>{const s=search.trim().toLowerCase();return(!s||p.name.toLowerCase().includes(s)||(p.sku||"").toLowerCase().includes(s))&&(filterCat==="الكل"||p.category===filterCat);});
   const filteredSales=sales.filter(r=>{const s=salesSearch.trim().toLowerCase();return!s||r.productName.toLowerCase().includes(s)||(r.customer?.name||"").includes(s)||(r.customer?.phone||"").includes(s);});
+  const dailySales=sales.filter(s=>s.date===dailyDate);
   const totalInv=products.reduce((s,p)=>s+(p.sellPrice||0)*p.quantity,0);
   const totalCost=products.reduce((s,p)=>s+(p.buyPrice||0)*p.quantity,0);
   const totalUnits=products.reduce((s,p)=>s+p.quantity,0);
   const totalRev=sales.reduce((s,r)=>s+r.total,0);
   const totalProfit=sales.reduce((s,r)=>s+(r.profit||0),0);
+  const totalDebts=debts.filter(d=>d.status==="unpaid").reduce((s,d)=>s+(+d.amount||0),0);
+  const totalExpenses=expenses.reduce((s,e)=>s+(+e.amount||0),0);
   const sqC=q=>q===0?T.red:q<=3?T.amber:T.green;
   const sqB=q=>q===0?T.redBg:q<=3?T.amberBg:T.greenBg;
   const card={background:T.card,border:"1px solid "+T.border,borderRadius:14};
@@ -213,52 +302,55 @@ function App(){
   if(screen==="login"||screen==="register")
     return <AuthScreen screen={screen} setScreen={setScreen} onLogin={login} T={T} themeName={themeName} setThemeName={setThemeName} users={users} setUsers={setUsers}/>;
 
-  if(loading)return(<div style={{background:T.bg,color:T.text,minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:12,fontFamily:"'Segoe UI',sans-serif"}}><div style={{fontSize:44}}>🌿</div><div style={{color:T.sub}}>جاري تحميل البيانات...</div></div>);
+  if(loading)return(<div style={{background:T.bg,color:T.text,minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:12,fontFamily:"'Segoe UI',sans-serif"}}><div style={{fontSize:44}}>🌿</div><div style={{color:T.sub}}>جاري المزامنة...</div></div>);
 
   return(
     <div style={{background:T.bg,color:T.text,minHeight:"100vh",display:"flex",fontFamily:"'Segoe UI',Tahoma,sans-serif",direction:"rtl"}}>
-      <div style={{width:195,minHeight:"100vh",background:T.sidebar,borderLeft:"1px solid "+T.sidebarBorder,display:"flex",flexDirection:"column",position:"sticky",top:0,height:"100vh",overflowY:"auto"}}>
+
+      {/* الشريط الجانبي */}
+      <div style={{width:200,minHeight:"100vh",background:T.sidebar,borderLeft:"1px solid "+T.sidebarBorder,display:"flex",flexDirection:"column",position:"sticky",top:0,height:"100vh",overflowY:"auto"}}>
         <div style={{padding:"1rem",borderBottom:"1px solid "+T.sidebarBorder}}>
           <div style={{fontWeight:700,fontSize:13,background:"linear-gradient(90deg,"+T.accent+","+T.green+")",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>🌿 {STORE_NAME}</div>
           <div style={{fontSize:11,color:T.sub,marginTop:3}}>{user.name}</div>
           <span style={{fontSize:10,background:ROLES[user.role]?.color+"22",color:ROLES[user.role]?.color,borderRadius:6,padding:"2px 7px",fontWeight:600}}>{ROLES[user.role]?.label}</span>
         </div>
-        <div style={{flex:1,padding:"0.5rem 0"}}>
-          {MENU.map(m=>(<button key={m.k} onClick={()=>setPage(m.k)} style={{display:"block",width:"100%",textAlign:"right",padding:"10px 1rem",border:"none",background:page===m.k?T.accent+"20":"transparent",color:page===m.k?T.accent:T.sub,cursor:"pointer",fontSize:13,fontWeight:page===m.k?700:400,borderRight:page===m.k?"3px solid "+T.accent:"3px solid transparent"}}>{m.l}</button>))}
+        <div style={{flex:1,padding:"0.5rem 0",overflowY:"auto"}}>
+          {MENU.map(m=>(<button key={m.k} onClick={()=>setPage(m.k)} style={{display:"block",width:"100%",textAlign:"right",padding:"9px 1rem",border:"none",background:page===m.k?T.accent+"20":"transparent",color:page===m.k?T.accent:T.sub,cursor:"pointer",fontSize:12,fontWeight:page===m.k?700:400,borderRight:page===m.k?"3px solid "+T.accent:"3px solid transparent"}}>{m.l}</button>))}
         </div>
         <div style={{padding:"0.75rem",borderTop:"1px solid "+T.sidebarBorder}}>
           <div style={{display:"flex",gap:4,marginBottom:8,flexWrap:"wrap"}}>
             {Object.entries(THEMES).map(([k,v])=>(<button key={k} onClick={()=>setThemeName(k)} style={{padding:"3px 7px",borderRadius:10,border:"1px solid "+(k===themeName?T.accent:T.border),background:k===themeName?T.accent:"transparent",color:k===themeName?T.accentText:T.sub,cursor:"pointer",fontSize:10}}>{v.name}</button>))}
           </div>
-          <button onClick={loadAll} style={{...btn({width:"100%",marginBottom:6,padding:"7px",fontSize:12,color:T.accent,borderColor:T.accent})}}>🔄 تحديث</button>
+          <button onClick={syncFromAPI} style={{...btn({width:"100%",marginBottom:6,padding:"7px",fontSize:12,color:T.accent,borderColor:T.accent})}}>🔄 مزامنة</button>
           <button onClick={logout} style={{...btn({width:"100%",color:T.red,borderColor:T.redBg,padding:"7px",fontSize:12})}}>🚪 خروج</button>
         </div>
       </div>
 
+      {/* المحتوى */}
       <div style={{flex:1,padding:"1.25rem",overflowY:"auto",maxHeight:"100vh"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"1rem",flexWrap:"wrap",gap:8}}>
           <h2 style={{fontSize:17,fontWeight:700}}>{MENU.find(m=>m.k===page)?.l||""}</h2>
           {saving&&<span style={{fontSize:12,color:T.amber}}>⏳ {saving}</span>}
         </div>
 
-        {page==="dashboard"&&(
-          <div>
-            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:"1.25rem"}}>
-              {[["📦 قيمة المخزون","$"+totalInv.toFixed(2),T.accent],isAdmin&&["💸 تكلفة المخزون","$"+totalCost.toFixed(2),T.sub],[products.length+" صنف · "+totalUnits+" وحدة","🗂 المواد",T.text],["💰 إيراد المبيعات","$"+totalRev.toFixed(2),T.green],isAdmin&&["📈 صافي الربح","$"+totalProfit.toFixed(2),totalProfit>=0?T.green:T.red],["⚠️ مخزون منخفض",products.filter(p=>p.quantity<=3).length+" صنف",T.amber]].filter(Boolean).map(([l,v,c])=>(<div key={l} style={sc}><div style={{fontSize:11,color:T.sub,marginBottom:3}}>{l}</div><div style={{fontSize:15,fontWeight:700,color:c}}>{v}</div></div>))}
-            </div>
-            {products.filter(p=>p.quantity<=3).length>0&&(<div style={{...card,padding:"1rem",marginBottom:"1rem",borderColor:T.amber}}><div style={{fontWeight:700,color:T.amber,marginBottom:8}}>⚠️ تحتاج إعادة تخزين</div>{products.filter(p=>p.quantity<=3).map(p=>(<div key={p.id} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid "+T.border,fontSize:13}}><span>{p.name}</span><span style={{color:sqC(p.quantity),fontWeight:700}}>{p.quantity} وحدة</span></div>))}</div>)}
-            <div style={{...card,padding:"1rem"}}><div style={{fontWeight:700,marginBottom:8}}>🕐 آخر المبيعات</div>{sales.slice(0,5).map(r=>(<div key={r.saleId} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid "+T.border,fontSize:13}}><span>{r.productName} — {r.customer?.name}</span><span style={{color:T.green,fontWeight:700}}>${r.total.toFixed(2)}</span></div>))}</div>
+        {/* الرئيسية */}
+        {page==="dashboard"&&(<div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:"1.25rem"}}>
+            {[["📦 قيمة المخزون","$"+totalInv.toFixed(2),T.accent],isAdmin&&["💸 تكلفة المخزون","$"+totalCost.toFixed(2),T.sub],[products.length+" صنف · "+totalUnits+" وحدة","🗂 المواد",T.text],["💰 إيراد المبيعات","$"+totalRev.toFixed(2),T.green],isAdmin&&["📈 صافي الربح","$"+totalProfit.toFixed(2),totalProfit>=0?T.green:T.red],["💳 ديون غير مسددة","$"+totalDebts.toFixed(2),T.red],["💸 المصروفات","$"+totalExpenses.toFixed(2),T.amber],["⚠️ مخزون منخفض",products.filter(p=>p.quantity<=3).length+" صنف",T.amber]].filter(Boolean).map(([l,v,c])=>(<div key={l} style={sc}><div style={{fontSize:11,color:T.sub,marginBottom:3}}>{l}</div><div style={{fontSize:15,fontWeight:700,color:c}}>{v}</div></div>))}
           </div>
-        )}
+          {products.filter(p=>p.quantity<=3).length>0&&(<div style={{...card,padding:"1rem",marginBottom:"1rem",borderColor:T.amber}}><div style={{fontWeight:700,color:T.amber,marginBottom:8}}>⚠️ تحتاج إعادة تخزين</div>{products.filter(p=>p.quantity<=3).map(p=>(<div key={p.id} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid "+T.border,fontSize:13}}><span>{p.name}</span><span style={{color:sqC(p.quantity),fontWeight:700}}>{p.quantity} وحدة</span></div>))}</div>)}
+          <div style={{...card,padding:"1rem"}}><div style={{fontWeight:700,marginBottom:8}}>🕐 آخر المبيعات</div>{sales.slice(0,5).map(r=>(<div key={r.saleId} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid "+T.border,fontSize:13}}><span>{r.productName} — {r.customer?.name}</span><span style={{color:T.green,fontWeight:700}}>${r.total.toFixed(2)}</span></div>))}</div>
+        </div>)}
 
+        {/* المخزن */}
         {page==="inventory"&&(<>
           <div style={{display:"flex",gap:8,marginBottom:"1rem"}}>
             <input placeholder="ابحث..." value={search} onChange={e=>setSearch(e.target.value)} style={{...inp,flex:1}}/>
             <select value={filterCat} onChange={e=>setFilterCat(e.target.value)} style={{...inp,width:140,cursor:"pointer"}}><option>الكل</option>{CATS.map(c=><option key={c}>{c}</option>)}</select>
           </div>
           {can("reports")&&(<div style={{display:"flex",gap:8,marginBottom:"1rem"}}>
-            <button onClick={()=>exportExcel(products,"المخزون",["الاسم","التصنيف","سعر الشراء","سعر البيع","الكمية"],["name","category","buyPrice","sellPrice","quantity"])} style={btn({fontSize:12,padding:"6px 12px",color:T.green,borderColor:T.greenBg})}>📥 Excel</button>
-            <button onClick={()=>printHTML(`<h2>${STORE_NAME}</h2><h3>تقرير المخزون</h3><table><thead><tr><th>الاسم</th><th>التصنيف</th><th>سعر البيع</th><th>الكمية</th></tr></thead><tbody>${products.map(p=>`<tr><td>${p.name}</td><td>${p.category}</td><td>$${(p.sellPrice||0).toFixed(2)}</td><td>${p.quantity}</td></tr>`).join("")}</tbody></table>`)} style={btn({fontSize:12,padding:"6px 12px",color:T.red,borderColor:T.redBg})}>📄 PDF</button>
+            <button onClick={()=>exportExcel(products,"المخزون",["الاسم","التصنيف","سعر الشراء","سعر البيع","الكمية","أضافه"],["name","category","buyPrice","sellPrice","quantity","addedBy"])} style={btn({fontSize:12,padding:"6px 12px",color:T.green,borderColor:T.greenBg})}>📥 Excel</button>
+            <button onClick={()=>printHTML(`<h2>${STORE_NAME}</h2><h3>تقرير المخزون</h3><table><thead><tr><th>الاسم</th><th>التصنيف</th><th>سعر البيع</th><th>الكمية</th><th>أضافه</th></tr></thead><tbody>${products.map(p=>`<tr><td>${p.name}</td><td>${p.category}</td><td>$${(p.sellPrice||0).toFixed(2)}</td><td>${p.quantity}</td><td>${p.addedBy||""}</td></tr>`).join("")}</tbody></table>`)} style={btn({fontSize:12,padding:"6px 12px",color:T.red,borderColor:T.redBg})}>📄 PDF</button>
           </div>)}
           {filtered.length===0?(<div style={{...card,textAlign:"center",padding:"3rem",color:T.sub}}>لا توجد منتجات.</div>):(
             <div style={{display:"flex",flexDirection:"column",gap:8}}>
@@ -268,10 +360,14 @@ function App(){
                   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
                     <div style={{gridColumn:"1/-1"}}><span style={lbl}>الاسم</span><input value={editForm.name} onChange={e=>setEditForm(f=>({...f,name:e.target.value}))} style={inp}/></div>
                     <div><span style={lbl}>التصنيف</span><select value={editForm.category} onChange={e=>setEditForm(f=>({...f,category:e.target.value}))} style={{...inp,cursor:"pointer"}}>{CATS.map(c=><option key={c}>{c}</option>)}</select></div>
-                    <div><span style={lbl}>الكود</span><input value={editForm.sku} onChange={e=>setEditForm(f=>({...f,sku:e.target.value}))} style={inp}/></div>
+                    <div><span style={lbl}>الكود</span><input value={editForm.sku||""} onChange={e=>setEditForm(f=>({...f,sku:e.target.value}))} style={inp}/></div>
                     <div><span style={lbl}>سعر الشراء</span><input type="number" value={editForm.buyPrice} onChange={e=>setEditForm(f=>({...f,buyPrice:e.target.value}))} style={{...inp,borderColor:T.amber}}/></div>
                     <div><span style={lbl}>سعر البيع</span><input type="number" value={editForm.sellPrice} onChange={e=>setEditForm(f=>({...f,sellPrice:e.target.value}))} style={{...inp,borderColor:T.green}}/></div>
                     <div style={{gridColumn:"1/-1"}}><span style={lbl}>الكمية</span><input type="number" value={editForm.quantity} onChange={e=>setEditForm(f=>({...f,quantity:e.target.value}))} style={inp}/></div>
+                    <div style={{gridColumn:"1/-1"}}><span style={lbl}>الصورة</span>
+                      {editForm.image&&<img src={editForm.image} style={{width:80,height:80,objectFit:"cover",borderRadius:8,marginBottom:6,display:"block"}}/>}
+                      <input type="file" accept="image/*" onChange={e=>e.target.files[0]&&readImage(e.target.files[0],img=>setEditForm(f=>({...f,image:img})))} style={{...inp,padding:"6px"}}/>
+                    </div>
                     <div style={{gridColumn:"1/-1",display:"flex",gap:8}}>
                       <button onClick={()=>saveEdit(p.id)} style={btn({flex:1,fontWeight:700,border:"1px solid "+T.accent,color:T.accent})}>حفظ</button>
                       <button onClick={()=>setEditId(null)} style={btn({flex:1,color:T.sub})}>إلغاء</button>
@@ -279,25 +375,27 @@ function App(){
                   </div>
                 </div>):(
                 <div style={{display:"flex",alignItems:"stretch",flexWrap:"wrap"}}>
-                  <div style={{flex:1,minWidth:150,padding:"0.85rem",borderLeft:"1px solid "+T.border}}>
-                    <div style={{fontWeight:700,fontSize:14,marginBottom:5}}>{p.name}</div>
-                    <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+                  {p.image&&<div style={{width:70,display:"flex",alignItems:"center",justifyContent:"center",padding:"0.5rem",borderLeft:"1px solid "+T.border}}><img src={p.image} style={{width:56,height:56,objectFit:"cover",borderRadius:8}}/></div>}
+                  <div style={{flex:1,minWidth:140,padding:"0.85rem",borderLeft:"1px solid "+T.border}}>
+                    <div style={{fontWeight:700,fontSize:14,marginBottom:4}}>{p.name}</div>
+                    <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:4}}>
                       <span style={{fontSize:11,background:T.statBg,border:"1px solid "+T.border,borderRadius:5,padding:"2px 7px",color:T.sub}}>{p.category}</span>
                       {p.sku&&<span style={{fontSize:11,color:T.sub}}>{p.sku}</span>}
                     </div>
-                    {isAdmin&&p.buyPrice&&p.sellPrice&&<div style={{fontSize:11,color:T.green,marginTop:4}}>ربح الوحدة: ${(p.sellPrice-p.buyPrice).toFixed(2)}</div>}
+                    {p.addedBy&&<div style={{fontSize:11,color:T.sub}}>أضافه: {p.addedBy}</div>}
+                    {isAdmin&&p.buyPrice&&p.sellPrice&&<div style={{fontSize:11,color:T.green,marginTop:2}}>ربح الوحدة: ${(p.sellPrice-p.buyPrice).toFixed(2)}</div>}
                   </div>
-                  {isAdmin?(<div style={{display:"flex",flexDirection:"column",justifyContent:"center",alignItems:"center",padding:"0.75rem",borderLeft:"1px solid "+T.border,minWidth:115,gap:4}}>
-                    <div style={{textAlign:"center"}}><div style={{fontSize:10,color:T.sub}}>سعر الشراء</div><div style={{fontSize:15,fontWeight:700,color:T.amber}}>${(p.buyPrice||0).toFixed(2)}</div></div>
+                  {isAdmin?(<div style={{display:"flex",flexDirection:"column",justifyContent:"center",alignItems:"center",padding:"0.75rem",borderLeft:"1px solid "+T.border,minWidth:110,gap:4}}>
+                    <div style={{textAlign:"center"}}><div style={{fontSize:10,color:T.sub}}>سعر الشراء</div><div style={{fontSize:14,fontWeight:700,color:T.amber}}>${(p.buyPrice||0).toFixed(2)}</div></div>
                     <div style={{width:"70%",height:1,background:T.border}}/>
-                    <div style={{textAlign:"center"}}><div style={{fontSize:10,color:T.sub}}>سعر البيع</div><div style={{fontSize:15,fontWeight:700,color:T.green}}>${(p.sellPrice||0).toFixed(2)}</div></div>
-                  </div>):(<div style={{display:"flex",flexDirection:"column",justifyContent:"center",alignItems:"center",padding:"0.75rem",borderLeft:"1px solid "+T.border,minWidth:115}}>
+                    <div style={{textAlign:"center"}}><div style={{fontSize:10,color:T.sub}}>سعر البيع</div><div style={{fontSize:14,fontWeight:700,color:T.green}}>${(p.sellPrice||0).toFixed(2)}</div></div>
+                  </div>):(<div style={{display:"flex",flexDirection:"column",justifyContent:"center",alignItems:"center",padding:"0.75rem",borderLeft:"1px solid "+T.border,minWidth:110}}>
                     <div style={{fontSize:10,color:T.sub}}>سعر البيع</div>
-                    <div style={{fontSize:16,fontWeight:700,color:T.green}}>${(p.sellPrice||0).toFixed(2)}</div>
+                    <div style={{fontSize:15,fontWeight:700,color:T.green}}>${(p.sellPrice||0).toFixed(2)}</div>
                   </div>)}
-                  <div style={{display:"flex",flexDirection:"column",justifyContent:"center",alignItems:"center",padding:"0.75rem",borderLeft:"1px solid "+T.border,minWidth:115,gap:4}}>
+                  <div style={{display:"flex",flexDirection:"column",justifyContent:"center",alignItems:"center",padding:"0.75rem",borderLeft:"1px solid "+T.border,minWidth:110,gap:4}}>
                     <div style={{fontSize:10,color:T.sub}}>الكمية</div>
-                    <div style={{fontSize:22,fontWeight:700,background:sqB(p.quantity),color:sqC(p.quantity),borderRadius:9,padding:"3px 13px"}}>{p.quantity}</div>
+                    <div style={{fontSize:20,fontWeight:700,background:sqB(p.quantity),color:sqC(p.quantity),borderRadius:9,padding:"3px 13px"}}>{p.quantity}</div>
                     <div style={{display:"flex",gap:4}}>
                       <button onClick={()=>adjustQty(p.id,1)} style={{width:27,height:27,borderRadius:6,border:"1px solid "+T.border,background:"transparent",cursor:"pointer",fontSize:16,color:T.green}}>+</button>
                       <button onClick={()=>adjustQty(p.id,-1)} style={{width:27,height:27,borderRadius:6,border:"1px solid "+T.border,background:"transparent",cursor:"pointer",fontSize:16,color:T.red}}>−</button>
@@ -306,8 +404,8 @@ function App(){
                   </div>
                   <div style={{display:"flex",flexDirection:"column",justifyContent:"center",gap:5,padding:"0.75rem"}}>
                     <button onClick={()=>{setSaleModal(p);setSaleQty(1);setCust(emptyCust);setCustErr("");}} style={{padding:"7px 12px",borderRadius:8,border:"none",background:T.sellBtn,color:T.sellBtnTxt,cursor:"pointer",fontSize:12,fontWeight:700}}>💰 بيع</button>
-                    {can("addProduct")&&<button onClick={()=>{setEditId(String(p.id));setEditForm({name:p.name,category:p.category,buyPrice:p.buyPrice||"",sellPrice:p.sellPrice||"",quantity:p.quantity,sku:p.sku||""});}} style={btn({padding:"6px 12px",fontSize:12})}>✏️ تعديل</button>}
-                    {isAdmin&&<button onClick={()=>deleteProduct(p.id)} style={btn({color:T.red,borderColor:T.redBg,padding:"6px 12px",fontSize:12})}>🗑 حذف</button>}
+                    {can("addProduct")&&<button onClick={()=>{setEditId(String(p.id));setEditForm({...p,buyPrice:p.buyPrice||"",sellPrice:p.sellPrice||"",quantity:p.quantity,sku:p.sku||"",image:p.image||""});}} style={btn({padding:"6px 12px",fontSize:12})}>✏️ تعديل</button>}
+                    {isAdmin&&<button onClick={()=>deleteProduct(p.id)} style={btn({color:T.red,borderColor:T.redBg,padding:"6px 12px",fontSize:12})}>🗑</button>}
                   </div>
                 </div>)}
               </div>))}
@@ -315,7 +413,8 @@ function App(){
           )}
         </>)}
 
-        {page==="addProduct"&&(<div style={{...card,padding:"1.5rem",maxWidth:600}}>
+        {/* إضافة مادة */}
+        {page==="addProduct"&&(<div style={{...card,padding:"1.5rem",maxWidth:620}}>
           <div style={{fontWeight:700,fontSize:15,color:T.accent,marginBottom:"1.1rem"}}>➕ إضافة منتج جديد</div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
             <div style={{gridColumn:"1/-1"}}><span style={lbl}>اسم المنتج *</span><input value={form.name} onChange={e=>setForm(f=>({...f,name:e.target.value}))} placeholder="مثال: معسل تفاح 250 جم" style={inp}/></div>
@@ -325,6 +424,12 @@ function App(){
             <div><span style={lbl}>سعر البيع ($) *</span><input type="number" min="0" value={form.sellPrice} onChange={e=>setForm(f=>({...f,sellPrice:e.target.value}))} placeholder="0.00" style={{...inp,borderColor:T.green}}/></div>
             {form.buyPrice&&form.sellPrice&&+form.sellPrice>0&&(<div style={{gridColumn:"1/-1",background:T.statBg,borderRadius:8,padding:"8px 14px",fontSize:13}}>ربح الوحدة: <b style={{color:T.green}}>${(+form.sellPrice-+form.buyPrice).toFixed(2)}</b> · هامش: <b style={{color:T.accent}}>{((+form.sellPrice-+form.buyPrice)/+form.sellPrice*100).toFixed(1)}%</b></div>)}
             <div style={{gridColumn:"1/-1"}}><span style={lbl}>الكمية *</span><input type="number" min="0" value={form.quantity} onChange={e=>setForm(f=>({...f,quantity:e.target.value}))} placeholder="0" style={inp}/></div>
+            <div style={{gridColumn:"1/-1"}}>
+              <span style={lbl}>صورة المنتج (اختياري)</span>
+              {form.image&&<img src={form.image} style={{width:90,height:90,objectFit:"cover",borderRadius:10,marginBottom:8,display:"block"}}/>}
+              <input type="file" accept="image/*" onChange={e=>e.target.files[0]&&readImage(e.target.files[0],img=>setForm(f=>({...f,image:img})))} style={{...inp,padding:"6px"}}/>
+            </div>
+            <div style={{gridColumn:"1/-1"}}><span style={lbl}>المضاف بواسطة</span><input value={user.name} disabled style={{...inp,opacity:0.6}}/></div>
           </div>
           {formErr&&<div style={{marginTop:10,fontSize:13,color:T.red,padding:"8px 12px",background:T.redBg,borderRadius:7}}>{formErr}</div>}
           <div style={{display:"flex",gap:8,marginTop:14}}>
@@ -333,15 +438,16 @@ function App(){
           </div>
         </div>)}
 
+        {/* سجل المبيعات */}
         {page==="sales"&&(<>
           {isAdmin&&(<div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:"1rem"}}>
             {[["الإيراد","$"+totalRev.toFixed(2),T.accent],["الربح","$"+totalProfit.toFixed(2),totalProfit>=0?T.green:T.red],["العمليات",sales.length,T.text],["الوحدات",sales.reduce((s,r)=>s+r.qty,0),T.text]].map(([l,v,c])=>(<div key={l} style={sc}><div style={{fontSize:10,color:T.sub,marginBottom:3}}>{l}</div><div style={{fontSize:17,fontWeight:700,color:c}}>{v}</div></div>))}
           </div>)}
-          <div style={{display:"flex",gap:8,marginBottom:"1rem"}}>
+          <div style={{display:"flex",gap:8,marginBottom:"1rem",flexWrap:"wrap"}}>
             <input placeholder="ابحث..." value={salesSearch} onChange={e=>setSalesSearch(e.target.value)} style={{...inp,flex:1}}/>
             {isAdmin&&<>
-              <button onClick={()=>exportExcel(sales,"المبيعات",["المنتج","الكمية","السعر","الإجمالي","الزبون","التاريخ"],["productName","qty","sellPrice","total","soldBy","date"])} style={btn({fontSize:12,padding:"6px 10px",color:T.green,borderColor:T.greenBg})}>📥 Excel</button>
-              <button onClick={()=>printHTML(`<h2>${STORE_NAME}</h2><h3>تقرير المبيعات</h3><table><thead><tr><th>المنتج</th><th>الكمية</th><th>الإجمالي</th><th>الزبون</th><th>التاريخ</th></tr></thead><tbody>${sales.map(r=>`<tr><td>${r.productName}</td><td>${r.qty}</td><td>$${r.total.toFixed(2)}</td><td>${r.customer?.name||""}</td><td>${r.date}</td></tr>`).join("")}</tbody></table><p class="ttl">الإجمالي: $${totalRev.toFixed(2)}</p>`)} style={btn({fontSize:12,padding:"6px 10px",color:T.red,borderColor:T.redBg})}>📄 PDF</button>
+              <button onClick={()=>exportExcel(sales,"المبيعات",["المنتج","الكمية","سعر الشراء","سعر البيع","المبلغ الصافي","الربح","الزبون","طريقة الدفع","التاريخ"],["productName","qty","buyPrice","sellPrice","total","profit","soldBy","payType","date"])} style={btn({fontSize:12,padding:"6px 10px",color:T.green,borderColor:T.greenBg})}>📥 Excel</button>
+              <button onClick={()=>printHTML(`<h2>${STORE_NAME}</h2><h3>تقرير المبيعات</h3><table><thead><tr><th>المنتج</th><th>الكمية</th><th>سعر الشراء</th><th>سعر البيع</th><th>الصافي</th><th>الزبون</th><th>التاريخ</th></tr></thead><tbody>${sales.map(r=>`<tr><td>${r.productName}</td><td>${r.qty}</td><td>$${(r.buyPrice||0).toFixed(2)}</td><td>$${(r.sellPrice||0).toFixed(2)}</td><td>$${r.total.toFixed(2)}</td><td>${r.customer?.name||""}</td><td>${r.date}</td></tr>`).join("")}</tbody></table><p class="ttl">الإجمالي: $${totalRev.toFixed(2)}</p>`)} style={btn({fontSize:12,padding:"6px 10px",color:T.red,borderColor:T.redBg})}>📄 PDF</button>
             </>}
           </div>
           {filteredSales.length===0?(<div style={{...card,textAlign:"center",padding:"3rem",color:T.sub}}>لا توجد مبيعات.</div>):(
@@ -349,18 +455,20 @@ function App(){
               {filteredSales.map(r=>(<div key={r.saleId} style={card}>
                 <div style={{display:"flex",alignItems:"center",gap:8,padding:"0.85rem 1rem",cursor:"pointer",flexWrap:"wrap"}} onClick={()=>setExpandedSale(expandedSale===r.saleId?null:r.saleId)}>
                   <div style={{flex:1,minWidth:120}}><div style={{fontWeight:700,fontSize:14}}>{r.productName}</div><div style={{fontSize:11,color:T.sub}}>{r.date} · {r.time}{r.soldBy?" · "+r.soldBy:""}</div></div>
-                  <div style={{textAlign:"center",minWidth:50}}><div style={{fontSize:10,color:T.sub}}>كمية</div><div style={{fontWeight:700}}>{r.qty}</div></div>
-                  <div style={{textAlign:"center",minWidth:70}}><div style={{fontSize:10,color:T.sub}}>الإجمالي</div><div style={{fontWeight:700,color:T.accent}}>${r.total.toFixed(2)}</div></div>
-                  {isAdmin&&<div style={{textAlign:"center",minWidth:65}}><div style={{fontSize:10,color:T.sub}}>الربح</div><div style={{fontWeight:700,color:(r.profit||0)>=0?T.green:T.red}}>${(r.profit||0).toFixed(2)}</div></div>}
+                  <div style={{textAlign:"center",minWidth:45}}><div style={{fontSize:10,color:T.sub}}>كمية</div><div style={{fontWeight:700}}>{r.qty}</div></div>
+                  <div style={{textAlign:"center",minWidth:65}}><div style={{fontSize:10,color:T.sub}}>سعر الشراء</div><div style={{fontWeight:600,color:T.amber}}>${(r.buyPrice||0).toFixed(2)}</div></div>
+                  <div style={{textAlign:"center",minWidth:65}}><div style={{fontSize:10,color:T.sub}}>سعر البيع</div><div style={{fontWeight:600,color:T.green}}>${(r.sellPrice||0).toFixed(2)}</div></div>
+                  <div style={{textAlign:"center",minWidth:70}}><div style={{fontSize:10,color:T.sub}}>المبلغ الصافي</div><div style={{fontWeight:700,color:T.accent}}>${r.total.toFixed(2)}</div></div>
+                  {isAdmin&&<div style={{textAlign:"center",minWidth:60}}><div style={{fontSize:10,color:T.sub}}>الربح</div><div style={{fontWeight:700,color:(r.profit||0)>=0?T.green:T.red}}>${(r.profit||0).toFixed(2)}</div></div>}
                   <span style={{color:T.sub,fontSize:12}}>{expandedSale===r.saleId?"▲":"▼"}</span>
                 </div>
                 {expandedSale===r.saleId&&(<div style={{borderTop:"1px solid "+T.border,padding:"0.85rem 1rem",background:T.statBg}}>
                   <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:10}}>
-                    {[["الزبون",r.customer?.name||""],["الهاتف",r.customer?.phone||"—"],["ملاحظة",r.customer?.note||"—"]].map(([l,v])=>(<div key={l}><div style={{fontSize:10,color:T.sub}}>{l}</div><div style={{fontSize:13,fontWeight:600}}>{v}</div></div>))}
+                    {[["الزبون",r.customer?.name||""],["الهاتف",r.customer?.phone||"—"],["طريقة الدفع",r.payType==="cash"?"نقداً":r.payType==="debt"?"دين":"بطاقة"]].map(([l,v])=>(<div key={l}><div style={{fontSize:10,color:T.sub}}>{l}</div><div style={{fontSize:13,fontWeight:600}}>{v}</div></div>))}
                   </div>
                   <div style={{display:"flex",gap:8}}>
                     <button onClick={()=>printHTML(invoiceHTML(r))} style={btn({fontSize:12,padding:"6px 12px",color:T.accent,borderColor:T.accent})}>🖨️ فاتورة</button>
-                    {isAdmin&&<button onClick={()=>deleteSale(r.saleId)} style={btn({color:T.red,borderColor:T.redBg,padding:"6px 12px",fontSize:12})}>🗑 حذف</button>}
+                    {isAdmin&&<button onClick={()=>deleteSale(r.saleId)} style={btn({color:T.red,borderColor:T.redBg,padding:"6px 12px",fontSize:12})}>🗑</button>}
                   </div>
                 </div>)}
               </div>))}
@@ -368,11 +476,162 @@ function App(){
           )}
         </>)}
 
+        {/* التقرير اليومي */}
+        {page==="dailyReport"&&(<div>
+          <div style={{display:"flex",gap:8,marginBottom:"1rem",alignItems:"center",flexWrap:"wrap"}}>
+            <div style={{flex:1,maxWidth:220}}><span style={lbl}>اختر التاريخ</span><input value={dailyDate} onChange={e=>setDailyDate(e.target.value)} placeholder="مثال: 13/5/2026" style={inp}/></div>
+            <button onClick={()=>setDailyDate(new Date().toLocaleDateString("ar-IQ"))} style={btn({fontSize:12,padding:"7px 14px",marginTop:16})}>اليوم</button>
+            {isAdmin&&<button onClick={()=>printHTML(`<h2>${STORE_NAME}</h2><h3>تقرير يومي — ${dailyDate}</h3><table><thead><tr><th>المنتج</th><th>الكمية</th><th>سعر البيع</th><th>الصافي</th><th>الربح</th><th>الزبون</th></tr></thead><tbody>${dailySales.map(r=>`<tr><td>${r.productName}</td><td>${r.qty}</td><td>$${(r.sellPrice||0).toFixed(2)}</td><td>$${r.total.toFixed(2)}</td><td>$${(r.profit||0).toFixed(2)}</td><td>${r.customer?.name||""}</td></tr>`).join("")}</tbody></table><p class="ttl">الإجمالي: $${dailySales.reduce((s,r)=>s+r.total,0).toFixed(2)} | الربح: $${dailySales.reduce((s,r)=>s+(r.profit||0),0).toFixed(2)}</p>`)} style={btn({fontSize:12,padding:"7px 14px",marginTop:16,color:T.red,borderColor:T.redBg})}>📄 طباعة</button>}
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:"1rem"}}>
+            {[["عدد المبيعات",dailySales.length,T.text],["الإيراد","$"+dailySales.reduce((s,r)=>s+r.total,0).toFixed(2),T.accent],["الربح","$"+dailySales.reduce((s,r)=>s+(r.profit||0),0).toFixed(2),T.green]].map(([l,v,c])=>(<div key={l} style={sc}><div style={{fontSize:11,color:T.sub,marginBottom:3}}>{l}</div><div style={{fontSize:18,fontWeight:700,color:c}}>{v}</div></div>))}
+          </div>
+          {dailySales.length===0?(<div style={{...card,textAlign:"center",padding:"2.5rem",color:T.sub}}>لا توجد مبيعات في هذا التاريخ.</div>):(
+            <div style={{display:"flex",flexDirection:"column",gap:7}}>
+              {dailySales.map(r=>(<div key={r.saleId} style={{...card,padding:"0.85rem 1rem",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+                <div><div style={{fontWeight:600,fontSize:13}}>{r.productName}</div><div style={{fontSize:11,color:T.sub}}>{r.customer?.name} · {r.time}</div></div>
+                <div style={{display:"flex",gap:12}}>
+                  <div style={{textAlign:"center"}}><div style={{fontSize:10,color:T.sub}}>كمية</div><div style={{fontWeight:700}}>{r.qty}</div></div>
+                  <div style={{textAlign:"center"}}><div style={{fontSize:10,color:T.sub}}>الصافي</div><div style={{fontWeight:700,color:T.accent}}>${r.total.toFixed(2)}</div></div>
+                  {isAdmin&&<div style={{textAlign:"center"}}><div style={{fontSize:10,color:T.sub}}>الربح</div><div style={{fontWeight:700,color:T.green}}>${(r.profit||0).toFixed(2)}</div></div>}
+                </div>
+              </div>))}
+            </div>
+          )}
+        </div>)}
+
+        {/* الديون */}
+        {page==="debts"&&(<div>
+          <div style={{...card,padding:"1.25rem",marginBottom:"1rem"}}>
+            <div style={{fontWeight:700,color:T.accent,marginBottom:"1rem"}}>➕ إضافة دين جديد</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+              <div><span style={lbl}>اسم الزبون *</span><input value={debtForm.customerName} onChange={e=>setDebtForm(f=>({...f,customerName:e.target.value}))} style={inp}/></div>
+              <div><span style={lbl}>رقم الهاتف</span><input value={debtForm.phone} onChange={e=>setDebtForm(f=>({...f,phone:e.target.value}))} style={inp}/></div>
+              <div><span style={lbl}>المبلغ ($) *</span><input type="number" value={debtForm.amount} onChange={e=>setDebtForm(f=>({...f,amount:e.target.value}))} style={inp}/></div>
+              <div><span style={lbl}>التاريخ</span><input value={debtForm.date} onChange={e=>setDebtForm(f=>({...f,date:e.target.value}))} style={inp}/></div>
+              <div style={{gridColumn:"1/-1"}}><span style={lbl}>ملاحظة</span><input value={debtForm.note} onChange={e=>setDebtForm(f=>({...f,note:e.target.value}))} style={inp}/></div>
+            </div>
+            <button onClick={()=>{if(!debtForm.customerName.trim()||!debtForm.amount){alert("أكمل البيانات");return;}setDebts(prev=>[{...debtForm,id:Date.now()},...prev]);setDebtForm(emptyDebt);}} style={{marginTop:12,padding:"8px 20px",borderRadius:8,border:"none",background:T.accent,color:T.accentText,cursor:"pointer",fontSize:13,fontWeight:700}}>إضافة</button>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:8,marginBottom:"1rem"}}>
+            <div style={sc}><div style={{fontSize:11,color:T.sub}}>إجمالي الديون</div><div style={{fontSize:18,fontWeight:700,color:T.red}}>${totalDebts.toFixed(2)}</div></div>
+            <div style={sc}><div style={{fontSize:11,color:T.sub}}>عدد المديونين</div><div style={{fontSize:18,fontWeight:700}}>{debts.filter(d=>d.status==="unpaid").length}</div></div>
+          </div>
+          <div style={{display:"flex",flexDirection:"column",gap:7}}>
+            {debts.map(d=>(<div key={d.id} style={{...card,padding:"1rem",display:"flex",alignItems:"center",gap:10,flexWrap:"wrap",opacity:d.status==="paid"?0.6:1}}>
+              <div style={{flex:1}}>
+                <div style={{fontWeight:700}}>{d.customerName}</div>
+                <div style={{fontSize:12,color:T.sub}}>{d.phone||"—"} · {d.date}</div>
+                {d.note&&<div style={{fontSize:12,color:T.sub}}>{d.note}</div>}
+              </div>
+              <div style={{fontWeight:700,fontSize:16,color:d.status==="paid"?T.green:T.red}}>${(+d.amount||0).toFixed(2)}</div>
+              <span style={{fontSize:11,background:d.status==="paid"?T.greenBg:T.redBg,color:d.status==="paid"?T.green:T.red,borderRadius:6,padding:"3px 9px"}}>{d.status==="paid"?"مسدد":"غير مسدد"}</span>
+              <div style={{display:"flex",gap:6}}>
+                {d.status==="unpaid"&&<button onClick={()=>setDebts(prev=>prev.map(x=>x.id===d.id?{...x,status:"paid"}:x))} style={btn({fontSize:12,padding:"5px 10px",color:T.green,borderColor:T.greenBg})}>✅ سدد</button>}
+                <button onClick={()=>setDebts(prev=>prev.filter(x=>x.id!==d.id))} style={btn({fontSize:12,padding:"5px 10px",color:T.red,borderColor:T.redBg})}>🗑</button>
+              </div>
+            </div>))}
+          </div>
+        </div>)}
+
+        {/* الموردون */}
+        {page==="suppliers"&&(<div>
+          <div style={{...card,padding:"1.25rem",marginBottom:"1rem"}}>
+            <div style={{fontWeight:700,color:T.accent,marginBottom:"1rem"}}>➕ إضافة مورد</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+              <div><span style={lbl}>اسم المورد *</span><input value={supplierForm.name} onChange={e=>setSupplierForm(f=>({...f,name:e.target.value}))} style={inp}/></div>
+              <div><span style={lbl}>رقم الهاتف</span><input value={supplierForm.phone} onChange={e=>setSupplierForm(f=>({...f,phone:e.target.value}))} style={inp}/></div>
+              <div><span style={lbl}>العنوان</span><input value={supplierForm.address} onChange={e=>setSupplierForm(f=>({...f,address:e.target.value}))} style={inp}/></div>
+              <div><span style={lbl}>ملاحظات</span><input value={supplierForm.notes} onChange={e=>setSupplierForm(f=>({...f,notes:e.target.value}))} style={inp}/></div>
+            </div>
+            <button onClick={()=>{if(!supplierForm.name.trim()){alert("أدخل اسم المورد");return;}setSuppliers(prev=>[{...supplierForm,id:Date.now()},...prev]);setSupplierForm(emptySupplier);}} style={{marginTop:12,padding:"8px 20px",borderRadius:8,border:"none",background:T.accent,color:T.accentText,cursor:"pointer",fontSize:13,fontWeight:700}}>إضافة</button>
+          </div>
+          <div style={{display:"flex",flexDirection:"column",gap:7}}>
+            {suppliers.length===0?(<div style={{...card,textAlign:"center",padding:"2.5rem",color:T.sub}}>لا يوجد موردون.</div>):suppliers.map(s=>(<div key={s.id} style={{...card,padding:"1rem",display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+              <div style={{flex:1}}>
+                <div style={{fontWeight:700}}>{s.name}</div>
+                <div style={{fontSize:12,color:T.sub}}>{s.phone||"—"}{s.address?" · "+s.address:""}</div>
+                {s.notes&&<div style={{fontSize:12,color:T.sub}}>{s.notes}</div>}
+              </div>
+              <button onClick={()=>setSuppliers(prev=>prev.filter(x=>x.id!==s.id))} style={btn({fontSize:12,padding:"5px 10px",color:T.red,borderColor:T.redBg})}>🗑</button>
+            </div>))}
+          </div>
+        </div>)}
+
+        {/* المصروفات */}
+        {page==="expenses"&&(<div>
+          <div style={{...card,padding:"1.25rem",marginBottom:"1rem"}}>
+            <div style={{fontWeight:700,color:T.accent,marginBottom:"1rem"}}>➕ إضافة مصروف</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+              <div><span style={lbl}>العنوان *</span><input value={expenseForm.title} onChange={e=>setExpenseForm(f=>({...f,title:e.target.value}))} style={inp}/></div>
+              <div><span style={lbl}>المبلغ ($) *</span><input type="number" value={expenseForm.amount} onChange={e=>setExpenseForm(f=>({...f,amount:e.target.value}))} style={inp}/></div>
+              <div><span style={lbl}>التصنيف</span><select value={expenseForm.category} onChange={e=>setExpenseForm(f=>({...f,category:e.target.value}))} style={{...inp,cursor:"pointer"}}>{EXPENSE_CATS.map(c=><option key={c}>{c}</option>)}</select></div>
+              <div><span style={lbl}>التاريخ</span><input value={expenseForm.date} onChange={e=>setExpenseForm(f=>({...f,date:e.target.value}))} style={inp}/></div>
+              <div style={{gridColumn:"1/-1"}}><span style={lbl}>ملاحظات</span><input value={expenseForm.notes} onChange={e=>setExpenseForm(f=>({...f,notes:e.target.value}))} style={inp}/></div>
+            </div>
+            <button onClick={()=>{if(!expenseForm.title.trim()||!expenseForm.amount){alert("أكمل البيانات");return;}setExpenses(prev=>[{...expenseForm,id:Date.now()},...prev]);setExpenseForm(emptyExpense);}} style={{marginTop:12,padding:"8px 20px",borderRadius:8,border:"none",background:T.accent,color:T.accentText,cursor:"pointer",fontSize:13,fontWeight:700}}>إضافة</button>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:8,marginBottom:"1rem"}}>
+            <div style={sc}><div style={{fontSize:11,color:T.sub}}>إجمالي المصروفات</div><div style={{fontSize:18,fontWeight:700,color:T.amber}}>${totalExpenses.toFixed(2)}</div></div>
+            <div style={sc}><div style={{fontSize:11,color:T.sub}}>عدد الإدخالات</div><div style={{fontSize:18,fontWeight:700}}>{expenses.length}</div></div>
+          </div>
+          {isAdmin&&expenses.length>0&&(<div style={{marginBottom:"1rem",display:"flex",gap:8}}>
+            <button onClick={()=>exportExcel(expenses,"المصروفات",["العنوان","المبلغ","التصنيف","التاريخ"],["title","amount","category","date"])} style={btn({fontSize:12,padding:"6px 12px",color:T.green,borderColor:T.greenBg})}>📥 Excel</button>
+          </div>)}
+          <div style={{display:"flex",flexDirection:"column",gap:7}}>
+            {expenses.length===0?(<div style={{...card,textAlign:"center",padding:"2.5rem",color:T.sub}}>لا توجد مصروفات.</div>):expenses.map(e=>(<div key={e.id} style={{...card,padding:"1rem",display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+              <div style={{flex:1}}>
+                <div style={{fontWeight:700}}>{e.title}</div>
+                <div style={{fontSize:12,color:T.sub}}>{e.category} · {e.date}</div>
+                {e.notes&&<div style={{fontSize:12,color:T.sub}}>{e.notes}</div>}
+              </div>
+              <div style={{fontWeight:700,color:T.amber}}>${(+e.amount||0).toFixed(2)}</div>
+              <button onClick={()=>setExpenses(prev=>prev.filter(x=>x.id!==e.id))} style={btn({fontSize:12,padding:"5px 10px",color:T.red,borderColor:T.redBg})}>🗑</button>
+            </div>))}
+          </div>
+        </div>)}
+
+        {/* الطلبات الراجعة */}
+        {page==="returns"&&(<div>
+          <div style={{...card,padding:"1.25rem",marginBottom:"1rem"}}>
+            <div style={{fontWeight:700,color:T.accent,marginBottom:"1rem"}}>➕ تسجيل طلب راجع</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+              <div><span style={lbl}>اسم المنتج *</span><input value={returnForm.productName} onChange={e=>setReturnForm(f=>({...f,productName:e.target.value}))} style={inp}/></div>
+              <div><span style={lbl}>اسم الزبون</span><input value={returnForm.customerName} onChange={e=>setReturnForm(f=>({...f,customerName:e.target.value}))} style={inp}/></div>
+              <div><span style={lbl}>الكمية</span><input type="number" value={returnForm.qty} onChange={e=>setReturnForm(f=>({...f,qty:e.target.value}))} style={inp}/></div>
+              <div><span style={lbl}>مبلغ الاسترداد ($)</span><input type="number" value={returnForm.refundAmount} onChange={e=>setReturnForm(f=>({...f,refundAmount:e.target.value}))} style={inp}/></div>
+              <div><span style={lbl}>التاريخ</span><input value={returnForm.date} onChange={e=>setReturnForm(f=>({...f,date:e.target.value}))} style={inp}/></div>
+              <div><span style={lbl}>الحالة</span><select value={returnForm.status} onChange={e=>setReturnForm(f=>({...f,status:e.target.value}))} style={{...inp,cursor:"pointer"}}><option value="pending">قيد المعالجة</option><option value="approved">مقبول</option><option value="rejected">مرفوض</option></select></div>
+              <div style={{gridColumn:"1/-1"}}><span style={lbl}>سبب الإرجاع</span><input value={returnForm.reason} onChange={e=>setReturnForm(f=>({...f,reason:e.target.value}))} style={inp}/></div>
+            </div>
+            <button onClick={()=>{if(!returnForm.productName.trim()){alert("أدخل اسم المنتج");return;}setReturns(prev=>[{...returnForm,id:Date.now()},...prev]);setReturnForm(emptyReturn);}} style={{marginTop:12,padding:"8px 20px",borderRadius:8,border:"none",background:T.accent,color:T.accentText,cursor:"pointer",fontSize:13,fontWeight:700}}>تسجيل</button>
+          </div>
+          <div style={{display:"flex",flexDirection:"column",gap:7}}>
+            {returns.length===0?(<div style={{...card,textAlign:"center",padding:"2.5rem",color:T.sub}}>لا توجد طلبات راجعة.</div>):returns.map(r=>(<div key={r.id} style={{...card,padding:"1rem",display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+              <div style={{flex:1}}>
+                <div style={{fontWeight:700}}>{r.productName}</div>
+                <div style={{fontSize:12,color:T.sub}}>{r.customerName||"—"} · {r.date} · كمية: {r.qty}</div>
+                {r.reason&&<div style={{fontSize:12,color:T.sub}}>السبب: {r.reason}</div>}
+              </div>
+              {r.refundAmount&&<div style={{fontWeight:700,color:T.amber}}>${(+r.refundAmount||0).toFixed(2)}</div>}
+              <span style={{fontSize:11,borderRadius:6,padding:"3px 9px",background:r.status==="approved"?T.greenBg:r.status==="rejected"?T.redBg:T.amberBg,color:r.status==="approved"?T.green:r.status==="rejected"?T.red:T.amber}}>{r.status==="approved"?"مقبول":r.status==="rejected"?"مرفوض":"قيد المعالجة"}</span>
+              <button onClick={()=>setReturns(prev=>prev.filter(x=>x.id!==r.id))} style={btn({fontSize:12,padding:"5px 10px",color:T.red,borderColor:T.redBg})}>🗑</button>
+            </div>))}
+          </div>
+        </div>)}
+
+        {/* قائمة الشراء */}
         {page==="purchases"&&(<div>
           <div style={{...card,padding:"1.5rem",marginBottom:"1rem"}}>
             <div style={{fontWeight:700,color:T.accent,marginBottom:"1rem"}}>قائمة شراء جديدة</div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:"1rem"}}>
-              <div><span style={lbl}>اسم المجهز *</span><input value={po.supplierName} onChange={e=>setPo(p=>({...p,supplierName:e.target.value}))} style={inp}/></div>
+              <div><span style={lbl}>اسم المجهز *</span>
+                <select value={supplierForm.id||""} onChange={e=>{const s=suppliers.find(x=>String(x.id)===e.target.value);setPo(p=>({...p,supplierName:s?s.name:e.target.value}));}} style={{...inp,cursor:"pointer",marginBottom:4}}>
+                  <option value="">اختر مورد...</option>
+                  {suppliers.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+                <input value={po.supplierName} onChange={e=>setPo(p=>({...p,supplierName:e.target.value}))} placeholder="أو اكتب اسماً" style={inp}/>
+              </div>
               <div><span style={lbl}>التاريخ</span><input value={po.date} onChange={e=>setPo(p=>({...p,date:e.target.value}))} style={inp}/></div>
               <div><span style={lbl}>ملاحظات</span><input value={po.notes} onChange={e=>setPo(p=>({...p,notes:e.target.value}))} style={inp}/></div>
               <div><span style={lbl}>الخصم ($)</span><input type="number" value={po.discount} onChange={e=>setPo(p=>({...p,discount:e.target.value}))} style={inp}/></div>
@@ -391,7 +650,7 @@ function App(){
             </div>
             <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
               <button onClick={()=>{if(!po.supplierName.trim()){alert("أدخل اسم المجهز");return;}const o={...po,id:Date.now(),itemsTotal:poItemsTotal,total:poFinal};setPurchaseOrders(p=>[o,...p]);setPo(emptyPO);}} style={{padding:"8px 18px",borderRadius:8,border:"none",background:T.accent,color:T.accentText,cursor:"pointer",fontSize:13,fontWeight:700}}>💾 حفظ</button>
-              <button onClick={()=>printHTML(poHTML({...po,itemsTotal:poItemsTotal,total:poFinal}))} style={btn({fontSize:12,color:T.accent,borderColor:T.accent})}>🖨️ طباعة</button>
+              <button onClick={()=>printHTML(`<h2>${STORE_NAME}</h2><h3>قائمة مشتريات</h3><p style="text-align:center">المجهز: ${po.supplierName} | ${po.date}</p><table><thead><tr><th>المادة</th><th>الكمية</th><th>السعر</th><th>الإجمالي</th></tr></thead><tbody>${po.items.map(i=>`<tr><td>${i.name}</td><td>${i.qty}</td><td>$${(+i.price).toFixed(2)}</td><td>$${((+i.price)*(+i.qty)).toFixed(2)}</td></tr>`).join("")}</tbody></table>${po.notes?`<p>ملاحظات: ${po.notes}</p>`:""}<p class="ttl">الإجمالي: $${poItemsTotal.toFixed(2)} | خصم: $${(+po.discount||0).toFixed(2)} | الصافي: $${poFinal.toFixed(2)}</p>`)} style={btn({fontSize:12,color:T.accent,borderColor:T.accent})}>🖨️ طباعة</button>
               <button onClick={()=>exportExcel(po.items,"قائمة_شراء",["المادة","الكمية","السعر"],["name","qty","price"])} style={btn({fontSize:12,color:T.green,borderColor:T.greenBg})}>📥 Excel</button>
             </div>
           </div>
@@ -399,46 +658,81 @@ function App(){
             <div><div style={{fontWeight:600}}>{o.supplierName}</div><div style={{fontSize:12,color:T.sub}}>{o.date} · {o.items.length} مواد</div></div>
             <div style={{fontWeight:700,color:T.accent}}>${(o.total||0).toFixed(2)}</div>
             <div style={{display:"flex",gap:6}}>
-              <button onClick={()=>printHTML(poHTML(o))} style={btn({fontSize:12,padding:"5px 10px",color:T.accent,borderColor:T.accent})}>🖨️</button>
+              <button onClick={()=>printHTML(`<h2>${STORE_NAME}</h2><h3>قائمة مشتريات</h3><p style="text-align:center">المجهز: ${o.supplierName} | ${o.date}</p><table><thead><tr><th>المادة</th><th>الكمية</th><th>السعر</th><th>الإجمالي</th></tr></thead><tbody>${o.items.map(i=>`<tr><td>${i.name}</td><td>${i.qty}</td><td>$${(+i.price).toFixed(2)}</td><td>$${((+i.price)*(+i.qty)).toFixed(2)}</td></tr>`).join("")}</tbody></table><p class="ttl">الصافي: $${(o.total||0).toFixed(2)}</p>`)} style={btn({fontSize:12,padding:"5px 10px",color:T.accent,borderColor:T.accent})}>🖨️</button>
               <button onClick={()=>setPurchaseOrders(p=>p.filter(x=>x.id!==o.id))} style={btn({fontSize:12,padding:"5px 10px",color:T.red,borderColor:T.redBg})}>🗑</button>
             </div>
           </div>))}
         </div>)}
 
+        {/* التقارير */}
         {page==="reports"&&(<div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:12}}>
-          {[{t:"📦 تقرير المخزون",d:"جميع المنتجات والكميات",xl:()=>exportExcel(products,"المخزون",["الاسم","التصنيف","سعر الشراء","سعر البيع","الكمية"],["name","category","buyPrice","sellPrice","quantity"]),pdf:()=>printHTML(`<h2>${STORE_NAME}</h2><h3>تقرير المخزون</h3><table><thead><tr><th>الاسم</th><th>التصنيف</th><th>سعر الشراء</th><th>سعر البيع</th><th>الكمية</th></tr></thead><tbody>${products.map(p=>`<tr><td>${p.name}</td><td>${p.category}</td><td>$${(p.buyPrice||0).toFixed(2)}</td><td>$${(p.sellPrice||0).toFixed(2)}</td><td>${p.quantity}</td></tr>`).join("")}</tbody></table>`)},{t:"📊 تقرير المبيعات",d:"جميع عمليات البيع",xl:()=>exportExcel(sales,"المبيعات",["المنتج","الكمية","الإجمالي","الربح","التاريخ"],["productName","qty","total","profit","date"]),pdf:()=>printHTML(`<h2>${STORE_NAME}</h2><h3>تقرير المبيعات</h3><table><thead><tr><th>المنتج</th><th>الكمية</th><th>الإجمالي</th><th>الربح</th><th>التاريخ</th></tr></thead><tbody>${sales.map(r=>`<tr><td>${r.productName}</td><td>${r.qty}</td><td>$${r.total.toFixed(2)}</td><td>$${(r.profit||0).toFixed(2)}</td><td>${r.date}</td></tr>`).join("")}</tbody></table><p class="ttl">الإجمالي: $${totalRev.toFixed(2)} | الربح: $${totalProfit.toFixed(2)}</p>`)}].map(r=>(<div key={r.t} style={{...card,padding:"1.25rem"}}><div style={{fontWeight:700,marginBottom:4}}>{r.t}</div><div style={{fontSize:12,color:T.sub,marginBottom:"1rem"}}>{r.d}</div><div style={{display:"flex",gap:8}}><button onClick={r.xl} style={btn({flex:1,color:T.green,borderColor:T.greenBg,padding:"8px"})}>📥 Excel</button><button onClick={r.pdf} style={btn({flex:1,color:T.red,borderColor:T.redBg,padding:"8px"})}>📄 PDF</button></div></div>))}
+          {[{t:"📦 تقرير المخزون",d:"جميع المنتجات والكميات",xl:()=>exportExcel(products,"المخزون",["الاسم","التصنيف","سعر الشراء","سعر البيع","الكمية","أضافه"],["name","category","buyPrice","sellPrice","quantity","addedBy"]),pdf:()=>printHTML(`<h2>${STORE_NAME}</h2><h3>تقرير المخزون</h3><table><thead><tr><th>الاسم</th><th>التصنيف</th><th>سعر الشراء</th><th>سعر البيع</th><th>الكمية</th><th>أضافه</th></tr></thead><tbody>${products.map(p=>`<tr><td>${p.name}</td><td>${p.category}</td><td>$${(p.buyPrice||0).toFixed(2)}</td><td>$${(p.sellPrice||0).toFixed(2)}</td><td>${p.quantity}</td><td>${p.addedBy||""}</td></tr>`).join("")}</tbody></table>`)},{t:"📊 تقرير المبيعات",d:"جميع عمليات البيع",xl:()=>exportExcel(sales,"المبيعات",["المنتج","الكمية","سعر الشراء","سعر البيع","الصافي","الربح","التاريخ"],["productName","qty","buyPrice","sellPrice","total","profit","date"]),pdf:()=>printHTML(`<h2>${STORE_NAME}</h2><h3>تقرير المبيعات</h3><table><thead><tr><th>المنتج</th><th>الكمية</th><th>سعر الشراء</th><th>سعر البيع</th><th>الصافي</th><th>التاريخ</th></tr></thead><tbody>${sales.map(r=>`<tr><td>${r.productName}</td><td>${r.qty}</td><td>$${(r.buyPrice||0).toFixed(2)}</td><td>$${(r.sellPrice||0).toFixed(2)}</td><td>$${r.total.toFixed(2)}</td><td>${r.date}</td></tr>`).join("")}</tbody></table><p class="ttl">الإجمالي: $${totalRev.toFixed(2)} | الربح: $${totalProfit.toFixed(2)}</p>`)},{t:"💸 تقرير المصروفات",d:"جميع المصروفات",xl:()=>exportExcel(expenses,"المصروفات",["العنوان","المبلغ","التصنيف","التاريخ"],["title","amount","category","date"]),pdf:()=>printHTML(`<h2>${STORE_NAME}</h2><h3>تقرير المصروفات</h3><table><thead><tr><th>العنوان</th><th>المبلغ</th><th>التصنيف</th><th>التاريخ</th></tr></thead><tbody>${expenses.map(e=>`<tr><td>${e.title}</td><td>$${(+e.amount||0).toFixed(2)}</td><td>${e.category}</td><td>${e.date}</td></tr>`).join("")}</tbody></table><p class="ttl">الإجمالي: $${totalExpenses.toFixed(2)}</p>`)},{t:"💳 تقرير الديون",d:"جميع الديون غير المسددة",xl:()=>exportExcel(debts.filter(d=>d.status==="unpaid"),"الديون",["الزبون","الهاتف","المبلغ","التاريخ"],["customerName","phone","amount","date"]),pdf:()=>printHTML(`<h2>${STORE_NAME}</h2><h3>تقرير الديون</h3><table><thead><tr><th>الزبون</th><th>الهاتف</th><th>المبلغ</th><th>التاريخ</th></tr></thead><tbody>${debts.filter(d=>d.status==="unpaid").map(d=>`<tr><td>${d.customerName}</td><td>${d.phone||"—"}</td><td>$${(+d.amount||0).toFixed(2)}</td><td>${d.date}</td></tr>`).join("")}</tbody></table><p class="ttl">الإجمالي: $${totalDebts.toFixed(2)}</p>`)}].map(r=>(<div key={r.t} style={{...card,padding:"1.25rem"}}><div style={{fontWeight:700,marginBottom:4}}>{r.t}</div><div style={{fontSize:12,color:T.sub,marginBottom:"1rem"}}>{r.d}</div><div style={{display:"flex",gap:8}}><button onClick={r.xl} style={btn({flex:1,color:T.green,borderColor:T.greenBg,padding:"8px"})}>📥 Excel</button><button onClick={r.pdf} style={btn({flex:1,color:T.red,borderColor:T.redBg,padding:"8px"})}>📄 PDF</button></div></div>))}
         </div>)}
 
+        {/* الحسابات */}
         {page==="accounts"&&(<div style={{display:"flex",flexDirection:"column",gap:12}}>
           <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:12}}>
-            {[["💰 إجمالي الإيرادات","$"+totalRev.toFixed(2),T.green],["💸 تكلفة المخزون","$"+totalCost.toFixed(2),T.amber],["📈 صافي الربح","$"+totalProfit.toFixed(2),totalProfit>=0?T.green:T.red],["📦 قيمة المخزون الحالي","$"+totalInv.toFixed(2),T.accent]].map(([l,v,c])=>(<div key={l} style={{...card,padding:"1.25rem"}}><div style={{fontSize:13,color:T.sub,marginBottom:5}}>{l}</div><div style={{fontSize:22,fontWeight:700,color:c}}>{v}</div></div>))}
+            {[["💰 إجمالي الإيرادات","$"+totalRev.toFixed(2),T.green],["💸 إجمالي المصروفات","$"+totalExpenses.toFixed(2),T.amber],["📈 صافي الربح","$"+(totalProfit-totalExpenses).toFixed(2),(totalProfit-totalExpenses)>=0?T.green:T.red],["📦 قيمة المخزون","$"+totalInv.toFixed(2),T.accent],["💳 ديون غير مسددة","$"+totalDebts.toFixed(2),T.red],["💰 تكلفة المخزون","$"+totalCost.toFixed(2),T.sub]].map(([l,v,c])=>(<div key={l} style={{...card,padding:"1.25rem"}}><div style={{fontSize:13,color:T.sub,marginBottom:5}}>{l}</div><div style={{fontSize:22,fontWeight:700,color:c}}>{v}</div></div>))}
           </div>
           <div style={{...card,padding:"1.25rem"}}><div style={{fontWeight:700,marginBottom:"1rem"}}>🏆 أكثر المنتجات مبيعاً</div>{Object.entries(sales.reduce((a,r)=>{a[r.productName]=(a[r.productName]||0)+r.qty;return a;},{})).sort((a,b)=>b[1]-a[1]).slice(0,8).map(([n,q])=>(<div key={n} style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:"1px solid "+T.border,fontSize:13}}><span>{n}</span><span style={{fontWeight:700,color:T.accent}}>{q} وحدة</span></div>))}</div>
         </div>)}
 
+        {/* الملاحظات */}
         {page==="notes"&&(<div style={{...card,padding:"1.5rem"}}>
           <textarea value={notes} onChange={e=>setNotes(e.target.value)} placeholder="اكتب ملاحظاتك هنا..." style={{...inp,height:280,resize:"vertical",lineHeight:1.9}}/>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:8}}>
             <span style={{fontSize:11,color:T.sub}}>{notes.length} حرف</span>
-            <button onClick={handleSaveNotes} style={{padding:"8px 22px",borderRadius:8,border:"none",background:T.accent,color:T.accentText,cursor:"pointer",fontSize:13,fontWeight:700}}>حفظ</button>
+            <button onClick={handleSaveNotes} style={{padding:"8px 22px",borderRadius:8,border:"none",background:T.accent,color:T.accentText,cursor:"pointer",fontSize:13,fontWeight:700}}>حفظ في الشيت</button>
           </div>
         </div>)}
 
+        {/* المستخدمون */}
         {page==="users"&&isAdmin&&<UsersManager T={T} users={users} setUsers={setUsers} user={user} refreshUser={refreshUser} btn={btn} lbl={lbl} inp={inp} card={card}/>}
+
+        {/* النسخ الاحتياطي */}
+        {page==="backup"&&(<div style={{display:"flex",flexDirection:"column",gap:12}}>
+          <div style={{...card,padding:"1.5rem"}}>
+            <div style={{fontWeight:700,fontSize:15,color:T.accent,marginBottom:"1rem"}}>💾 النسخ الاحتياطي</div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:"1.25rem"}}>
+              {[["📦 المنتجات",products.length],["📊 المبيعات",sales.length],["💳 الديون",debts.length],["🏭 الموردون",suppliers.length],["💸 المصروفات",expenses.length],["↩️ الطلبات الراجعة",returns.length]].map(([l,v])=>(<div key={l} style={sc}><div style={{fontSize:11,color:T.sub,marginBottom:3}}>{l}</div><div style={{fontSize:16,fontWeight:700}}>{v} سجل</div></div>))}
+            </div>
+            <div style={{background:T.statBg,borderRadius:10,padding:"12px",marginBottom:"1.25rem",fontSize:13}}>
+              <div style={{display:"flex",justifyContent:"space-between"}}><span style={{color:T.sub}}>حجم البيانات المحفوظة</span><b style={{color:T.accent}}>{getStorageSize()} KB</b></div>
+            </div>
+            <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+              <button onClick={doBackup} style={{padding:"10px 24px",borderRadius:9,border:"none",background:T.accent,color:T.accentText,cursor:"pointer",fontSize:14,fontWeight:700}}>📥 تحميل نسخة احتياطية</button>
+              <label style={{padding:"10px 24px",borderRadius:9,border:"1px solid "+T.border,cursor:"pointer",fontSize:14,fontWeight:700,color:T.text}}>
+                📤 استعادة نسخة
+                <input type="file" accept=".json" style={{display:"none"}} onChange={e=>e.target.files[0]&&doRestore(e.target.files[0])}/>
+              </label>
+            </div>
+            <div style={{marginTop:"1rem",fontSize:12,color:T.sub,background:T.statBg,borderRadius:8,padding:"10px"}}>
+              ⚠️ البيانات تُحفظ تلقائياً في المتصفح — لن تُفقد عند إغلاق الصفحة أو التحديث. يُنصح بتحميل نسخة احتياطية أسبوعياً.
+            </div>
+          </div>
+        </div>)}
       </div>
 
+      {/* نافذة البيع */}
       {saleModal&&(<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:300,padding:"1rem"}}>
-        <div style={{...card,padding:"1.75rem",width:"100%",maxWidth:400,maxHeight:"92vh",overflowY:"auto"}}>
+        <div style={{...card,padding:"1.75rem",width:"100%",maxWidth:420,maxHeight:"92vh",overflowY:"auto"}}>
           <div style={{fontWeight:700,fontSize:17,color:T.accent,marginBottom:4}}>💰 تسجيل بيع</div>
           <div style={{fontSize:13,color:T.sub,marginBottom:"1rem",paddingBottom:"1rem",borderBottom:"1px solid "+T.border}}><b style={{color:T.text}}>{saleModal.name}</b> · المتوفر: <b style={{color:T.green}}>{saleModal.quantity}</b></div>
           <div style={{marginBottom:"1rem"}}><span style={lbl}>الكمية</span><input type="number" min={1} max={saleModal.quantity} value={saleQty} onChange={e=>setSaleQty(Math.max(1,Math.min(saleModal.quantity,parseInt(e.target.value)||1)))} style={{...inp,fontSize:15,fontWeight:700}}/></div>
           <div style={{background:T.statBg,borderRadius:9,padding:"10px 12px",marginBottom:"1rem",fontSize:13}}>
-            {[["سعر البيع","$"+(saleModal.sellPrice||0).toFixed(2),T.green],["الإجمالي","$"+((saleModal.sellPrice||0)*saleQty).toFixed(2),T.accent],["الكمية بعد البيع",(saleModal.quantity-saleQty)+" وحدة",sqC(saleModal.quantity-saleQty)]].map(([l,v,c],i,a)=>(<div key={l} style={{display:"flex",justifyContent:"space-between",marginBottom:i<a.length-1?5:0,paddingBottom:i<a.length-1?5:0,borderBottom:i<a.length-1?"1px solid "+T.border:"none"}}><span style={{color:T.sub}}>{l}</span><b style={{color:c}}>{v}</b></div>))}
+            {[["سعر الشراء","$"+(saleModal.buyPrice||0).toFixed(2),T.amber],["سعر البيع","$"+(saleModal.sellPrice||0).toFixed(2),T.green],["المبلغ الصافي","$"+((saleModal.sellPrice||0)*saleQty).toFixed(2),T.accent],["الربح","$"+(((saleModal.sellPrice||0)-(saleModal.buyPrice||0))*saleQty).toFixed(2),T.green],["الكمية بعد البيع",(saleModal.quantity-saleQty)+" وحدة",sqC(saleModal.quantity-saleQty)]].map(([l,v,c],i,a)=>(<div key={l} style={{display:"flex",justifyContent:"space-between",marginBottom:i<a.length-1?5:0,paddingBottom:i<a.length-1?5:0,borderBottom:i<a.length-1?"1px solid "+T.border:"none"}}><span style={{color:T.sub}}>{l}</span><b style={{color:c}}>{v}</b></div>))}
           </div>
           <div style={{fontWeight:700,fontSize:13,color:T.accent,marginBottom:8}}>👤 الزبون</div>
           <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:"1rem"}}>
             <div><span style={lbl}>الاسم *</span><input value={cust.name} onChange={e=>setCust(c=>({...c,name:e.target.value}))} style={inp}/></div>
             <div><span style={lbl}>الهاتف</span><input value={cust.phone} onChange={e=>setCust(c=>({...c,phone:e.target.value}))} style={inp}/></div>
+            <div><span style={lbl}>طريقة الدفع</span>
+              <select value={cust.payType} onChange={e=>setCust(c=>({...c,payType:e.target.value}))} style={{...inp,cursor:"pointer"}}>
+                <option value="cash">نقداً</option>
+                <option value="debt">دين</option>
+                <option value="card">بطاقة</option>
+              </select>
+            </div>
             <div><span style={lbl}>ملاحظة</span><input value={cust.note} onChange={e=>setCust(c=>({...c,note:e.target.value}))} style={inp}/></div>
           </div>
           {custErr&&<div style={{marginBottom:10,fontSize:13,color:T.red,padding:"8px",background:T.redBg,borderRadius:7}}>{custErr}</div>}
@@ -449,6 +743,7 @@ function App(){
         </div>
       </div>)}
 
+      {/* نافذة الفاتورة */}
       {printInvoice&&(<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:400,padding:"1rem"}}>
         <div style={{...card,padding:"1.75rem",width:"100%",maxWidth:360}}>
           <div style={{fontWeight:700,fontSize:15,color:T.green,marginBottom:"1rem"}}>✅ تم البيع بنجاح</div>
@@ -463,21 +758,24 @@ function App(){
   );
 }
 
+// ══ إدارة المستخدمين ════════════════════════════════════
 function UsersManager({T,users,setUsers,user,refreshUser,btn,lbl,inp,card}){
   const[tab,setTab]=useState("list");
   const[editU,setEditU]=useState(null);
+  // إظهار جميع المستخدمين بما فيهم pending
   const pending=users.filter(u=>u.status==="pending");
+  const approved=users.filter(u=>u.status==="approved");
   function approveUser(id){setUsers(prev=>prev.map(u=>u.id===id?{...u,status:"approved"}:u));}
-  function rejectUser(id){if(!confirm("رفض الطلب وحذفه؟"))return;setUsers(prev=>prev.filter(u=>u.id!==id));}
-  function deleteUser(id){if(!confirm("حذف هذا المستخدم؟"))return;setUsers(prev=>prev.filter(u=>u.id!==id));}
+  function rejectUser(id){if(!confirm("رفض وحذف الطلب؟"))return;setUsers(prev=>prev.filter(u=>u.id!==id));}
+  function deleteUser(id){if(!confirm("حذف المستخدم؟"))return;setUsers(prev=>prev.filter(u=>u.id!==id));}
   function saveUserEdit(){setUsers(prev=>prev.map(u=>u.id===editU.id?editU:u));if(editU.id===user.id)refreshUser(editU);setEditU(null);}
   const rc={admin:T.accent,accountant:T.green,warehouse:T.amber,staff:T.sub};
   return(<div>
     <div style={{display:"flex",gap:6,marginBottom:"1.25rem",flexWrap:"wrap"}}>
-      {[["list","👥 المستخدمون"],["pending","⏳ طلبات الانضمام"+(pending.length>0?" ("+pending.length+")":"")]].map(([k,l])=>(<button key={k} onClick={()=>setTab(k)} style={{padding:"8px 16px",borderRadius:9,border:"1px solid "+(tab===k?T.accent:T.border),background:tab===k?T.accent:"transparent",color:tab===k?T.accentText:T.sub,cursor:"pointer",fontSize:13,fontWeight:tab===k?700:400}}>{l}</button>))}
+      {[["list","👥 المستخدمون ("+approved.length+")"],["pending","⏳ طلبات الانضمام"+(pending.length>0?" ("+pending.length+")":"")]].map(([k,l])=>(<button key={k} onClick={()=>setTab(k)} style={{padding:"8px 16px",borderRadius:9,border:"1px solid "+(tab===k?T.accent:T.border),background:tab===k?T.accent:"transparent",color:tab===k?T.accentText:T.sub,cursor:"pointer",fontSize:13,fontWeight:tab===k?700:400}}>{l}</button>))}
     </div>
     {tab==="list"&&(<div style={{display:"flex",flexDirection:"column",gap:8}}>
-      {users.filter(u=>u.status==="approved").map(u=>(<div key={u.id} style={{...card,padding:"1rem"}}>
+      {approved.map(u=>(<div key={u.id} style={{...card,padding:"1rem"}}>
         {editU?.id===u.id?(<div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
             <div><span style={lbl}>الاسم</span><input value={editU.name} onChange={e=>setEditU(x=>({...x,name:e.target.value}))} style={inp}/></div>
@@ -508,13 +806,16 @@ function UsersManager({T,users,setUsers,user,refreshUser,btn,lbl,inp,card}){
       </div>))}
     </div>)}
     {tab==="pending"&&(<div>
-      {pending.length===0?(<div style={{...card,textAlign:"center",padding:"3rem",color:T.sub}}>لا توجد طلبات انضمام.</div>):(
+      {pending.length===0?(<div style={{...card,textAlign:"center",padding:"3rem",color:T.sub}}>✅ لا توجد طلبات انضمام جديدة.</div>):(
         <div style={{display:"flex",flexDirection:"column",gap:8}}>
-          {pending.map(u=>(<div key={u.id} style={{...card,padding:"1rem",display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
-            <div style={{flex:1}}><div style={{fontWeight:700}}>{u.name}</div><div style={{fontSize:12,color:T.sub}}>{u.phone} · {ROLES[u.role]?.label}</div></div>
+          {pending.map(u=>(<div key={u.id} style={{...card,padding:"1rem",display:"flex",alignItems:"center",gap:10,flexWrap:"wrap",borderColor:T.amber}}>
+            <div style={{flex:1}}>
+              <div style={{fontWeight:700}}>{u.name}</div>
+              <div style={{fontSize:12,color:T.sub}}>{u.phone} · {ROLES[u.role]?.label}</div>
+            </div>
             <div style={{display:"flex",gap:8}}>
-              <button onClick={()=>approveUser(u.id)} style={{padding:"6px 14px",borderRadius:8,border:"none",background:T.green,color:"#fff",cursor:"pointer",fontSize:13,fontWeight:700}}>✅ قبول</button>
-              <button onClick={()=>rejectUser(u.id)} style={btn({color:T.red,borderColor:T.redBg,padding:"6px 14px",fontSize:13})}>❌ رفض</button>
+              <button onClick={()=>approveUser(u.id)} style={{padding:"7px 16px",borderRadius:8,border:"none",background:T.green,color:"#fff",cursor:"pointer",fontSize:13,fontWeight:700}}>✅ قبول</button>
+              <button onClick={()=>rejectUser(u.id)} style={btn({color:T.red,borderColor:T.redBg,padding:"7px 16px",fontSize:13})}>❌ رفض</button>
             </div>
           </div>))}
         </div>
@@ -523,6 +824,7 @@ function UsersManager({T,users,setUsers,user,refreshUser,btn,lbl,inp,card}){
   </div>);
 }
 
+// ══ شاشة تسجيل الدخول ════════════════════════════════════
 function AuthScreen({screen,setScreen,onLogin,T,themeName,setThemeName,users,setUsers}){
   const[phone,setPhone]=useState("");
   const[pass,setPass]=useState("");
@@ -582,7 +884,7 @@ function AuthScreen({screen,setScreen,onLogin,T,themeName,setThemeName,users,set
           <div style={{fontSize:36,marginBottom:8}}>✅</div>
           <div style={{fontWeight:700,marginBottom:4}}>تم إرسال طلب الانضمام</div>
           <div style={{fontSize:13,color:T.sub,marginBottom:"1.25rem"}}>انتظر موافقة المدير على حسابك</div>
-          <button onClick={()=>{setScreen("login");setROk(false);}} style={{padding:"9px 24px",borderRadius:9,border:"none",background:T.accent,color:T.accentText,cursor:"pointer",fontSize:13,fontWeight:700}}>العودة لتسجيل الدخول</button>
+          <button onClick={()=>{setScreen("login");setROk(false);}} style={{padding:"9px 24px",borderRadius:9,border:"none",background:T.accent,color:T.accentText,cursor:"pointer",fontSize:13,fontWeight:700}}>العودة</button>
         </div>):(<div>
           <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:"1.25rem"}}>
             <div><div style={{fontSize:11,color:T.sub,marginBottom:4}}>👤 الاسم الكامل</div><input value={rName} onChange={e=>setRName(e.target.value)} placeholder="أحمد محمد" style={i2}/></div>
