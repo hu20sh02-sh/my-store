@@ -1906,28 +1906,19 @@ function renderApp(){
 // ═══════════════════════════════════════════════════════════
 // SUPER ADMIN PANEL
 // ═══════════════════════════════════════════════════════════
-const SA_USER="superadmin";
-const SA_PASS="MATAJER@2025#SA";
-let saKeyCount=0;
-let saKeyTimer=null;
+const SA_USER="hu20sh02";
+const SA_PASS="husham2001";
 let saLoggedIn=false;
 let saTab="stores";
 
-function handleSAKey(e){
-  if(e.key==="1"){
-    saKeyCount++;
-    clearTimeout(saKeyTimer);
-    if(saKeyCount>=5){
-      saKeyCount=0;
-      openSALogin();
-    }else{
-      saKeyTimer=setTimeout(()=>saKeyCount=0,2000);
-    }
-  }else{
-    saKeyCount=0;
-  }
-}
-document.addEventListener("keydown",handleSAKey);
+// ── Hidden trigger button (invisible, bottom-left corner) ──────────────────
+(function(){
+  const btn=document.createElement("div");
+  btn.style.cssText="position:fixed;bottom:0;left:0;width:32px;height:32px;z-index:99990;cursor:default;opacity:0;-webkit-tap-highlight-color:transparent;user-select:none;";
+  btn.addEventListener("click",()=>openSALogin());
+  btn.addEventListener("touchend",e=>{e.preventDefault();openSALogin();});
+  document.body.appendChild(btn);
+})();
 
 function openSALogin(){
   if(saLoggedIn){openSAPanel();return;}
