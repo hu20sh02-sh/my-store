@@ -583,7 +583,7 @@ function renderCreateForm(c){
 
 function renderLoginForm(c){
   const stores=PD.stores;
-  const storeOpts=stores.map(s=>`<option value="${s.id}" ${PS.loginStoreId===s.id?"selected":""}>${s.name}</option>`).join("");
+  const storeOpts=stores.map(s=>`<option value="${s.id}" ${PS.loginStoreId===s.id?"selected":""} ${s.banned?"disabled":""} >${s.name}${s.banned?" 🚫 (محظور)":""}</option>`).join("");
   c.innerHTML=`
     <h2 class="auth-title">🔑 الدخول إلى متجرك</h2>
     <p class="auth-sub">اختر متجرك وأدخل بيانات الدخول</p>
@@ -623,8 +623,7 @@ async function createStore(){
   if(PS.cPass!==PS.cPass2){PS.cErr="كلمة المرور غير متطابقة";renderAuthCard();return;}
   // Check phone uniqueness in both approved stores AND pending requests
   const allPhones=[...PD.stores.map(s=>s.adminPhone),...(PD.pendingStores||[]).map(s=>s.adminPhone)];
-  const blocked=PD.blockedPhones||[];
-  if(allPhones.includes(PS.cPhone.trim())||blocked.includes(PS.cPhone.trim())){PS.cErr="رقم الهاتف مسجل مسبقاً أو محظور";renderAuthCard();return;}
+  if(allPhones.includes(PS.cPhone.trim())){PS.cErr="رقم الهاتف لديه متجر نشط أو طلب معلق بالفعل";renderAuthCard();return;}
   const defaultCats=getCatsByType(PS.cCat);
   const req={
     id:"store_"+Date.now(),
@@ -730,6 +729,7 @@ function doLogin(){
   if(!PS.lPhone.trim()||!PS.lPass.trim()){PS.lErr="أكمل بيانات الدخول";renderAuthCard();return;}
   const store=PD.stores.find(s=>s.id===PS.loginStoreId);
   if(!store){PS.lErr="المتجر غير موجود";renderAuthCard();return;}
+  if(store.banned){PS.lErr="🚫 هذا المتجر محظور. تواصل مع الإدارة.";renderAuthCard();return;}
   // Check all users in store's local storage
   const storeUsers=ls("vs_users_"+store.id,[{id:"1",name:store.ownerName,phone:store.adminPhone,password:store.adminPass,role:"admin",status:"approved",perms:ADMIN_PERMS}]);
   const user=storeUsers.find(u=>u.phone===PS.lPhone.trim()&&u.password===PS.lPass&&u.status==="approved");
@@ -740,7 +740,7 @@ function doLogin(){
 // ═══════════════════════════════════════════════════════════
 // STORE APP ENGINE
 // ═══════════════════════════════════════════════════════════
-const ADMIN_PERMS=["dashboard","inventory","addProduct","quickSale","sales","dailyReport","debts","suppliers","expenses","returns","purchases","reports","accounts","notes","users","backup"];
+const ADMIN_PERMS=["dashboard","inventory","addProduct","quickSale","sales","dailyReport","debts","suppliers","expenses","returns","purchases","reports","accounts","notes","users","storeName","backup"];
 const ROLES={
   admin:{label:"مدير",color:"#6366f1",p:ADMIN_PERMS},
   accountant:{label:"محاسب",color:"#22c55e",p:["dashboard","accounts","reports","quickSale","sales","dailyReport","expenses"]},
@@ -754,7 +754,7 @@ const PAGES=[
   {k:"expenses",l:"💸 المصروفات"},{k:"returns",l:"↩️ الطلبات الراجعة"},
   {k:"purchases",l:"🛒 قائمة الشراء"},{k:"reports",l:"📈 التقارير"},
   {k:"accounts",l:"💰 الحسابات"},{k:"notes",l:"📝 ملاحظات"},
-  {k:"users",l:"👥 المستخدمون"},{k:"backup",l:"💾 النسخ الاحتياطي"},
+  {k:"users",l:"👥 المستخدمون"},{k:"storeName",l:"✏️ اسم المتجر"},{k:"backup",l:"💾 النسخ الاحتياطي"},
 ];
 
 let CURRENT_STORE=null;
@@ -775,6 +775,7 @@ async function apiGet(p){if(!CURRENT_STORE?.apiUrl)return{ok:false};try{const r=
 async function apiPost(b){if(!CURRENT_STORE?.apiUrl)return{ok:false};try{const r=await fetch(CURRENT_STORE.apiUrl,{method:"POST",body:JSON.stringify(b)});return r.json();}catch{return{ok:false};}}
 
 function openStoreApp(store,user){
+  if(store.banned){alert("🚫 هذا المتجر محظور ولا يمكن فتحه.");return;}
   CURRENT_STORE=store;
   const DA={id:"1",name:store.ownerName,phone:store.adminPhone,password:store.adminPass,role:"admin",status:"approved",perms:ADMIN_PERMS};
   // Ensure admin is in users list
@@ -1824,6 +1825,48 @@ function pgUsers(){
   return div("",[tabs,body].filter(Boolean));
 }
 
+function pgStoreName(){
+  // Only admin can change store name
+  const isAdmin=S.user?.role==="admin";
+  if(!isAdmin)return card([div("",["⛔ هذه الميزة متاحة للمدير فقط."],{style:{color:"var(--rd)",textAlign:"center",padding:"1rem"}})]);
+  const nameInp=document.createElement("input");
+  nameInp.type="text";
+  nameInp.value=S._newStoreName!=null?S._newStoreName:(CURRENT_STORE?.name||"");
+  nameInp.style.cssText="width:100%;padding:12px 16px;border-radius:12px;border:2px solid var(--ac);background:var(--in);color:var(--text);font-size:16px;font-weight:700;direction:rtl;font-family:inherit;box-sizing:border-box;";
+  nameInp.oninput=e=>{S._newStoreName=e.target.value;};
+  const saveBtn=document.createElement("button");
+  saveBtn.className="btn-primary";
+  saveBtn.style.cssText="width:100%;padding:13px;font-size:15px;font-weight:700;border-radius:12px;margin-top:12px;border:none;cursor:pointer;";
+  saveBtn.textContent="💾 حفظ الاسم الجديد";
+  saveBtn.onclick=async()=>{
+    const newName=(S._newStoreName||"").trim();
+    if(!newName){alert("أدخل اسم المتجر");return;}
+    if(newName===CURRENT_STORE.name){alert("الاسم لم يتغير");return;}
+    if(!confirm("تغيير اسم المتجر إلى '"+newName+"'؟"))return;
+    // Update in PD and save to cloud
+    const idx=PD.stores.findIndex(x=>x.id===CURRENT_STORE.id);
+    if(idx>=0){PD.stores[idx].name=newName;await savePortalData(PD);}
+    CURRENT_STORE.name=newName;
+    S._newStoreName=null;
+    renderApp();
+    // Toast
+    const t=document.createElement("div");
+    t.style.cssText="position:fixed;bottom:90px;left:50%;transform:translateX(-50%);background:var(--ac);color:#fff;padding:12px 24px;border-radius:12px;font-weight:700;font-size:14px;z-index:99999;pointer-events:none;";
+    t.textContent="✅ تم تغيير اسم المتجر إلى: "+newName;
+    document.body.appendChild(t);setTimeout(()=>t.remove(),2800);
+  };
+  const wrap=document.createElement("div");
+  wrap.appendChild(nameInp);
+  wrap.appendChild(saveBtn);
+  return card([
+    div("",["✏️ تغيير اسم المتجر"],{style:{fontWeight:"800",color:"var(--ac)",fontSize:"15px",marginBottom:"12px"}}),
+    div("",["اسم المتجر الحالي: "],{style:{fontSize:"13px",color:"var(--sub)",marginBottom:"8px"}}),
+    div("",[CURRENT_STORE?.name||""],{style:{fontWeight:"700",fontSize:"16px",marginBottom:"14px",color:"var(--text)"}}),
+    div("",[lbl("الاسم الجديد"),wrap]),
+    div("",["⚠️ هذا الإجراء متاح للمدير فقط ويؤثر على جميع الفواتير والتقارير"],{style:{fontSize:"11px",color:"var(--am)",marginTop:"10px"}}),
+  ]);
+}
+
 function pgBackup(){
   function backupData(){const d={store:CURRENT_STORE,products:S.products,sales:S.sales,debts:S.debts,suppliers:S.suppliers,expenses:S.expenses,returns:S.returns};const blob=new Blob([JSON.stringify(d,null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="backup_"+(CURRENT_STORE?.name||"store")+"_"+today().replace(/\//g,"-")+".json";a.click();}
   function restoreData(e){const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=ev=>{try{const d=JSON.parse(ev.target.result);if(d.products)sP(d.products);if(d.sales)sSa(d.sales);if(d.debts)sDe(d.debts);if(d.suppliers)sSu(d.suppliers);if(d.expenses)sEx(d.expenses);if(d.returns)sRt(d.returns);alert("✅ تم الاستعادة بنجاح!");renderApp();}catch{alert("❌ ملف غير صالح");}};r.readAsText(f);}
@@ -1879,7 +1922,7 @@ function renderApp(){
   const overlay=div("overlay"+(S.sideOpen?" show":""));
   overlay.addEventListener("click",()=>set("sideOpen",false));
 
-  const pageMap={dashboard:pgDashboard,inventory:pgInventory,addProduct:pgAddProduct,quickSale:pgQuickSale,sales:pgSales,dailyReport:pgDailyReport,debts:pgDebts,suppliers:pgSuppliers,expenses:pgExpenses,returns:pgReturns,purchases:pgPurchases,reports:pgReports,accounts:pgAccounts,notes:pgNotes,users:pgUsers,backup:pgBackup};
+  const pageMap={dashboard:pgDashboard,inventory:pgInventory,addProduct:pgAddProduct,quickSale:pgQuickSale,sales:pgSales,storeName:pgStoreName,dailyReport:pgDailyReport,debts:pgDebts,suppliers:pgSuppliers,expenses:pgExpenses,returns:pgReturns,purchases:pgPurchases,reports:pgReports,accounts:pgAccounts,notes:pgNotes,users:pgUsers,backup:pgBackup};
   const pageContent=(pageMap[S.page]||pgDashboard)();
   const pageLabel=MENU.find(m=>m.k===S.page)?.l||"";
 
@@ -2056,7 +2099,7 @@ function renderSAPanel(panel){
                 <div style="display:flex;align-items:center;gap:8px;">
                   <div style="width:32px;height:32px;border-radius:8px;background:${acol}22;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0;">${emoji}</div>
                   <div>
-                    <div style="font-weight:700;color:#eceef6;">${s.name}</div>
+                    <div style="font-weight:700;color:#eceef6;">${s.name} ${s.banned?'<span style="background:rgba(244,63,94,.2);color:#f43f5e;border-radius:5px;padding:1px 6px;font-size:10px;font-weight:700;">محظور</span>':''}</div>
                     <div style="font-size:11px;color:#6b7280;">${s.createdAt}</div>
                   </div>
                 </div>
@@ -2075,6 +2118,7 @@ function renderSAPanel(panel){
                 <div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap;">
                   <button onclick="saChangePlan('${s.id}')" style="padding:5px 10px;border-radius:7px;border:1px solid #7c6cfa44;background:transparent;color:#7c6cfa;font-size:11px;cursor:pointer;font-family:inherit;">✏️ الخطة</button>
                   <button onclick="saViewStore('${s.id}')" style="padding:5px 10px;border-radius:7px;border:1px solid #22c55e44;background:transparent;color:#22c55e;font-size:11px;cursor:pointer;font-family:inherit;">👁 عرض</button>
+                  <button onclick="saToggleBan('${s.id}')" style="padding:5px 10px;border-radius:7px;border:1px solid ${s.banned?'#22c55e44':'rgba(245,158,11,.3)'};background:${s.banned?'rgba(34,197,94,.1)':'rgba(245,158,11,.08)'};color:${s.banned?'#22c55e':'#f59e0b'};font-size:11px;cursor:pointer;font-family:inherit;">${s.banned?'🔓 رفع الحظر':'🚫 حظر'}</button>
                   <button onclick="saDeleteStore('${s.id}')" style="padding:5px 10px;border-radius:7px;border:1px solid rgba(244,63,94,.3);background:transparent;color:#f43f5e;font-size:11px;cursor:pointer;font-family:inherit;">🗑 حذف</button>
                 </div>
               </td>
@@ -2170,6 +2214,17 @@ function renderSAPanel(panel){
   }
 }
 
+async function saToggleBan(id){
+  const s=PD.stores.find(x=>x.id===id);
+  if(!s)return;
+  const action=s.banned?"رفع الحظر عن":"حظر";
+  if(!confirm(action+" متجر '"+s.name+"'؟"))return;
+  s.banned=!s.banned;
+  await savePortalData(PD);
+  renderSAPanel();
+  renderStores();
+}
+
 async function saApproveStore(id){
   const req=(PD.pendingStores||[]).find(x=>x.id===id);
   if(!req)return;
@@ -2217,11 +2272,7 @@ async function saDeleteStore(id){
   if(!confirm("حذف متجر '"+s.name+"' نهائياً؟\nسيتم حذف جميع بياناته ولا يمكن التراجع!"))return;
   // Remove from stores list
   PD.stores=PD.stores.filter(x=>x.id!==id);
-  // Block phone from re-registering by adding to blocklist
-  if(!PD.blockedPhones)PD.blockedPhones=[];
-  if(s.adminPhone&&!PD.blockedPhones.includes(s.adminPhone)){
-    PD.blockedPhones.push(s.adminPhone);
-  }
+  // Phone NOT blocked — owner can re-register a new store
   // Clear localStorage data for this store
   const keys=["prod","sale","note","debt","supp","exp","ret","po","users","inv_n","inv_periods"];
   keys.forEach(k=>localStorage.removeItem("vs_"+k+"_"+id));
