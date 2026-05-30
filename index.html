@@ -377,42 +377,58 @@ const PLANS={
   business:{label:"أعمال",price:"35$/شهر",color:"#f59e0b",maxProducts:-1,maxUsers:-1},
 };
 
-function getPortalData(){
-  try{const v=localStorage.getItem(PORTAL_KEY);return v?JSON.parse(v):{stores:[],currentStoreId:null};}
-  catch{return{stores:[],currentStoreId:null};}
-}
-function savePortalData(d){try{localStorage.setItem(PORTAL_KEY,JSON.stringify(d));}catch{}}
+// ── Cloud sync via JSONBin.io ─────────────────────────────────────────────────
+// BIN stores: { stores:[], pendingStores:[] }
+const JSONBIN_BIN_ID="685991728561e97a500e85b1";
+const JSONBIN_API_KEY="$2a$10$9FRw6HJXAuJfm8uiQrX5S.OXVGAqfGpvFUAVb4H3Hxco.lHOV0i5C";
+const JSONBIN_URL="https://api.jsonbin.io/v3/b/"+JSONBIN_BIN_ID;
+let _cloudSaving=false;
+let _localFallback=false;
 
-let PD=getPortalData();
+async function loadPortalData(){
+  try{
+    const r=await fetch(JSONBIN_URL+"/latest",{headers:{"X-Master-Key":JSONBIN_API_KEY,"X-Bin-Meta":"false"}});
+    if(!r.ok)throw new Error("fetch failed");
+    const d=await r.json();
+    if(d&&Array.isArray(d.stores)){
+      PD=d;
+      if(!PD.pendingStores)PD.pendingStores=[];
+      localStorage.setItem(PORTAL_KEY,JSON.stringify(PD));// local cache
+      return true;
+    }
+  }catch(e){console.warn("Cloud load failed, using local cache",e);}
+  // fallback to localStorage
+  try{const v=localStorage.getItem(PORTAL_KEY);if(v){PD=JSON.parse(v);if(!PD.pendingStores)PD.pendingStores=[];return false;}}catch{}
+  PD={stores:[],pendingStores:[]};
+  return false;
+}
+
+async function savePortalData(d){
+  PD=d;
+  if(!PD.pendingStores)PD.pendingStores=[];
+  localStorage.setItem(PORTAL_KEY,JSON.stringify(PD));// always save locally too
+  if(_cloudSaving)return;
+  _cloudSaving=true;
+  try{
+    await fetch(JSONBIN_URL,{method:"PUT",headers:{"Content-Type":"application/json","X-Master-Key":JSONBIN_API_KEY},body:JSON.stringify(PD)});
+  }catch(e){console.warn("Cloud save failed",e);}
+  _cloudSaving=false;
+}
+
+function getPortalData(){return PD;}// kept for compat
+
+let PD={stores:[],pendingStores:[]};
 let activeTab="create";
+let _portalReady=false;
 
-// Demo stores if empty
-if(PD.stores.length===0){
-  PD.stores=[
-    {id:"demo1",name:"متجر الفيب والشيشة",ownerName:"أحمد خالد",phone:"07701234567",
-     category:"متجر فيب وشيشة",color:"indigo",plan:"pro",
-     adminPhone:"07701234567",adminPass:"admin123",
-     createdAt:"2025-01-10",productsCount:47,salesCount:312,
-     cats:["جهاز فيب","سائل إلكتروني","شيشة","معسل","فحم","إكسسوارات","أخرى"],
-     expCats:["عام","إيجار","رواتب","كهرباء","نقل","أخرى"],
-     apiUrl:""},
-    {id:"demo2",name:"صيدلية النور",ownerName:"علي حسن",phone:"07809876543",
-     category:"صيدلية",color:"emerald",plan:"free",
-     adminPhone:"07809876543",adminPass:"noor2025",
-     createdAt:"2025-02-14",productsCount:120,salesCount:890,
-     cats:["دواء","مستحضرات","أجهزة طبية","مكملات","أخرى"],
-     expCats:["عام","إيجار","رواتب","أخرى"],
-     apiUrl:""},
-    {id:"demo3",name:"كافيه الجادة",ownerName:"سارة محمد",phone:"07512223333",
-     category:"مطعم / كافيه",color:"amber",plan:"business",
-     adminPhone:"07512223333",adminPass:"cafe2025",
-     createdAt:"2025-03-01",productsCount:35,salesCount:1250,
-     cats:["مشروبات ساخنة","مشروبات باردة","وجبات","حلويات","أخرى"],
-     expCats:["عام","إيجار","رواتب","كهرباء","مواد خام","أخرى"],
-     apiUrl:""},
-  ];
-  savePortalData(PD);
-}
+// Show loading overlay until cloud data loads
+(function(){
+  const ov=document.createElement("div");
+  ov.id="cloud-loading";
+  ov.style.cssText="position:fixed;inset:0;background:#0a0c14;z-index:99997;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;";
+  ov.innerHTML='<div style="font-size:40px;">☁️</div><div style="font-size:16px;font-weight:700;color:#eceef6;">جاري تحميل البيانات...</div><div style="font-size:12px;color:#6b7280;">مزامنة مع السحابة</div>';
+  document.body.appendChild(ov);
+})();
 
 // ═══════════════════════════════════════════════════════════
 // PORTAL UI
@@ -489,6 +505,7 @@ const PS={
   // create
   cName:"",cOwner:"",cPhone:"",cCat:STORE_CATS[0],cColor:"indigo",cPlan:"free",
   cPass:"",cPass2:"",cAPI:"",cErr:"",cCats:"",cExpCats:"",
+  cOk:"",
   // login
   loginStoreId:"",selectedStore:null,lPhone:"",lPass:"",lErr:"",
   // register (employee self-register)
@@ -517,6 +534,7 @@ function renderCreateForm(c){
     <h2 class="auth-title">✨ أنشئ متجرك الآن</h2>
     <p class="auth-sub">سيكون متجرك جاهزاً خلال ثوانٍ</p>
     ${PS.cErr?`<div class="auth-err">${PS.cErr}</div>`:""}
+    ${PS.cOk?`<div class="auth-ok">${PS.cOk}</div>`:""}
     <div class="g2-fields">
       <div class="field-group">
         <label>اسم المتجر *</label>
@@ -596,17 +614,19 @@ function renderLoginForm(c){
   `;
 }
 
-function createStore(){
+async function createStore(){
   PS.cErr="";
   if(!PS.cName.trim()){PS.cErr="أدخل اسم المتجر";renderAuthCard();return;}
   if(!PS.cOwner.trim()){PS.cErr="أدخل اسم المالك";renderAuthCard();return;}
   if(!PS.cPhone.trim()){PS.cErr="أدخل رقم الهاتف";renderAuthCard();return;}
   if(!PS.cPass.trim()){PS.cErr="أدخل كلمة المرور";renderAuthCard();return;}
   if(PS.cPass!==PS.cPass2){PS.cErr="كلمة المرور غير متطابقة";renderAuthCard();return;}
-  if(PD.stores.find(s=>s.adminPhone===PS.cPhone.trim())){PS.cErr="رقم الهاتف مسجل مسبقاً";renderAuthCard();return;}
-  const plan=PLANS[PS.cPlan];
+  // Check phone uniqueness in both approved stores AND pending requests
+  const allPhones=[...PD.stores.map(s=>s.adminPhone),...(PD.pendingStores||[]).map(s=>s.adminPhone)];
+  const blocked=PD.blockedPhones||[];
+  if(allPhones.includes(PS.cPhone.trim())||blocked.includes(PS.cPhone.trim())){PS.cErr="رقم الهاتف مسجل مسبقاً أو محظور";renderAuthCard();return;}
   const defaultCats=getCatsByType(PS.cCat);
-  const newStore={
+  const req={
     id:"store_"+Date.now(),
     name:PS.cName.trim(),
     ownerName:PS.cOwner.trim(),
@@ -616,18 +636,23 @@ function createStore(){
     plan:PS.cPlan,
     adminPhone:PS.cPhone.trim(),
     adminPass:PS.cPass,
+    requestedAt:new Date().toLocaleDateString("ar-IQ"),
     createdAt:new Date().toLocaleDateString("ar-IQ"),
     productsCount:0,salesCount:0,
     cats:defaultCats.cats,
     expCats:defaultCats.expCats,
-    apiUrl:PS.cAPI.trim(),
+    apiUrl:PS.cAPI?.trim()||"",
+    status:"pending",
   };
-  PD.stores.push(newStore);
-  savePortalData(PD);
+  if(!PD.pendingStores)PD.pendingStores=[];
+  PD.pendingStores.push(req);
+  await savePortalData(PD);
+  // Show success message
+  PS.cErr="";PS.cName="";PS.cOwner="";PS.cPhone="";PS.cPass="";PS.cPass2="";
+  PS.cOk="✅ تم إرسال طلب الانضمام! انتظر موافقة الإدارة ثم سجّل الدخول.";
+  renderAuthCard();
   updateStats();
   renderStores();
-  // Auto-login to new store
-  openStoreApp(newStore,{id:"1",name:newStore.ownerName,phone:newStore.adminPhone,password:newStore.adminPass,role:"admin",status:"approved",perms:ADMIN_PERMS});
 }
 
 function getCatsByType(type){
@@ -1992,6 +2017,7 @@ function renderSAPanel(panel){
     </div>
     <div style="display:flex;gap:8px;">
       <button onclick="saTab='stores';renderSAPanel()" style="padding:7px 14px;border-radius:9px;border:1px solid ${saTab==='stores'?'#7c6cfa':'#252839'};background:${saTab==='stores'?'rgba(124,108,250,.15)':'transparent'};color:${saTab==='stores'?'#7c6cfa':'#6b7280'};font-size:13px;cursor:pointer;font-family:inherit;">🏪 المتاجر</button>
+      <button onclick="saTab='pending';renderSAPanel()" style="padding:7px 14px;border-radius:9px;border:1px solid ${saTab==='pending'?'#f59e0b':'#252839'};background:${saTab==='pending'?'rgba(245,158,11,.15)':'transparent'};color:${saTab==='pending'?'#f59e0b':'#6b7280'};font-size:13px;cursor:pointer;font-family:inherit;position:relative;">⏳ الطلبات${(PD.pendingStores||[]).length>0?` <span style="background:#f43f5e;color:#fff;border-radius:10px;padding:1px 6px;font-size:10px;margin-right:4px;">${(PD.pendingStores||[]).length}</span>`:''}</button>
       <button onclick="saTab='stats';renderSAPanel()" style="padding:7px 14px;border-radius:9px;border:1px solid ${saTab==='stats'?'#7c6cfa':'#252839'};background:${saTab==='stats'?'rgba(124,108,250,.15)':'transparent'};color:${saTab==='stats'?'#7c6cfa':'#6b7280'};font-size:13px;cursor:pointer;font-family:inherit;">📊 الإحصائيات</button>
       <button onclick="saTab='settings';renderSAPanel()" style="padding:7px 14px;border-radius:9px;border:1px solid ${saTab==='settings'?'#7c6cfa':'#252839'};background:${saTab==='settings'?'rgba(124,108,250,.15)':'transparent'};color:${saTab==='settings'?'#7c6cfa':'#6b7280'};font-size:13px;cursor:pointer;font-family:inherit;">⚙️ الإعدادات</button>
       <button onclick="saLoggedIn=false;closeSAPanel()" style="padding:7px 14px;border-radius:9px;border:1px solid rgba(244,63,94,.3);background:transparent;color:#f43f5e;font-size:13px;cursor:pointer;font-family:inherit;">🚪 خروج</button>
@@ -2060,6 +2086,30 @@ function renderSAPanel(panel){
     </div>`;
   }
 
+  else if(saTab==="pending"){
+    const pending=(PD.pendingStores||[]);
+    body.innerHTML=`
+    <h2 style="font-size:17px;font-weight:800;margin-bottom:1.25rem;color:#f59e0b;">⏳ طلبات الانضمام (${pending.length})</h2>
+    ${pending.length===0?'<div style="text-align:center;padding:3rem;color:#6b7280;background:#10131f;border-radius:14px;border:1px solid #252839;">لا توجد طلبات انضمام.</div>':`
+    <div style="display:flex;flex-direction:column;gap:12px;">
+      ${pending.map(req=>`
+        <div style="background:#10131f;border:1px solid #f59e0b44;border-radius:14px;padding:1.25rem;">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;margin-bottom:12px;">
+            <div>
+              <div style="font-size:16px;font-weight:800;color:#eceef6;margin-bottom:4px;">${STORE_EMOJIS[req.category]||'🏪'} ${req.name}</div>
+              <div style="font-size:12px;color:#6b7280;margin-bottom:2px;">المالك: <strong style="color:#eceef6;">${req.ownerName}</strong> · الهاتف: <strong style="color:#eceef6;">${req.adminPhone}</strong></div>
+              <div style="font-size:12px;color:#6b7280;">النوع: ${req.category} · الخطة: <span style="color:${PLANS[req.plan]?.color||'#6b7280'}">${PLANS[req.plan]?.label||'مجاني'}</span> · تاريخ الطلب: ${req.requestedAt}</div>
+            </div>
+            <span style="background:rgba(245,158,11,.15);color:#f59e0b;border:1px solid #f59e0b44;border-radius:8px;padding:4px 12px;font-size:12px;font-weight:700;">معلق</span>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <button onclick="saApproveStore('${req.id}')" style="flex:1;min-width:140px;padding:10px;border-radius:9px;border:none;background:#22c55e;color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;">✅ موافقة وتفعيل المتجر</button>
+            <button onclick="saRejectStore('${req.id}')" style="padding:10px 18px;border-radius:9px;border:1px solid rgba(244,63,94,.3);background:transparent;color:#f43f5e;font-size:13px;cursor:pointer;font-family:inherit;">❌ رفض</button>
+          </div>
+        </div>
+      `).join("")}
+    </div>`}`;
+  }
   else if(saTab==="stats"){
     body.innerHTML=`
     <h2 style="font-size:17px;font-weight:800;margin-bottom:1.25rem;">📊 إحصائيات المنصة</h2>
@@ -2105,9 +2155,8 @@ function renderSAPanel(panel){
       <div style="background:#10131f;border:1px solid #252839;border-radius:14px;padding:1.25rem;">
         <h3 style="font-size:14px;font-weight:700;margin-bottom:1rem;color:#7c6cfa;">🗝️ طريقة الوصول</h3>
         <div style="font-size:13px;color:#6b7280;line-height:1.7;">
-          اضغط مفتاح <span style="background:#252839;color:#eceef6;padding:2px 8px;border-radius:5px;font-family:monospace;font-weight:700;">1</span> خمس مرات متتالية لفتح نافذة الدخول
+          زر مخفي في <span style="background:#252839;color:#eceef6;padding:2px 8px;border-radius:5px;font-weight:700;">الزاوية السفلية اليسرى</span> من الشاشة — اضغط عليه مرة واحدة لفتح نافذة الدخول
         </div>
-        <div style="margin-top:12px;font-size:12px;color:#6b7280;">المهلة بين الضغطات: 2 ثانية</div>
       </div>
       <div style="background:#10131f;border:1px solid #252839;border-radius:14px;padding:1.25rem;grid-column:1/-1;">
         <h3 style="font-size:14px;font-weight:700;margin-bottom:1rem;color:#7c6cfa;">💾 إدارة البيانات</h3>
@@ -2121,13 +2170,37 @@ function renderSAPanel(panel){
   }
 }
 
-function saChangePlan(id){
+async function saApproveStore(id){
+  const req=(PD.pendingStores||[]).find(x=>x.id===id);
+  if(!req)return;
+  // Move from pending to approved stores
+  PD.pendingStores=(PD.pendingStores||[]).filter(x=>x.id!==id);
+  const approved={...req,status:"approved",approvedAt:new Date().toLocaleDateString("ar-IQ")};
+  delete approved.requestedAt;
+  PD.stores.push(approved);
+  await savePortalData(PD);
+  renderSAPanel();
+  renderStores();
+  updateStats();
+  alert("✅ تم تفعيل متجر '"+approved.name+"' بنجاح!");
+}
+
+async function saRejectStore(id){
+  const req=(PD.pendingStores||[]).find(x=>x.id===id);
+  if(!req)return;
+  if(!confirm("رفض طلب '"+req.name+"'؟"))return;
+  PD.pendingStores=(PD.pendingStores||[]).filter(x=>x.id!==id);
+  await savePortalData(PD);
+  renderSAPanel();
+}
+
+async function saChangePlan(id){
   const s=PD.stores.find(x=>x.id===id);if(!s)return;
   const plans=Object.keys(PLANS);
   const cur=plans.indexOf(s.plan);
   const next=plans[(cur+1)%plans.length];
   s.plan=next;
-  savePortalData(PD);
+  await savePortalData(PD);
   renderSAPanel();
   renderStores();
 }
@@ -2138,19 +2211,30 @@ function saViewStore(id){
   alert(info);
 }
 
-function saDeleteStore(id){
-  if(!confirm("هل أنت متأكد من حذف هذا المتجر؟ لا يمكن التراجع!"))return;
-  PD.stores=PD.stores.filter(s=>s.id!==id);
-  savePortalData(PD);
+async function saDeleteStore(id){
+  const s=PD.stores.find(x=>x.id===id);
+  if(!s)return;
+  if(!confirm("حذف متجر '"+s.name+"' نهائياً؟\nسيتم حذف جميع بياناته ولا يمكن التراجع!"))return;
+  // Remove from stores list
+  PD.stores=PD.stores.filter(x=>x.id!==id);
+  // Block phone from re-registering by adding to blocklist
+  if(!PD.blockedPhones)PD.blockedPhones=[];
+  if(s.adminPhone&&!PD.blockedPhones.includes(s.adminPhone)){
+    PD.blockedPhones.push(s.adminPhone);
+  }
+  // Clear localStorage data for this store
+  const keys=["prod","sale","note","debt","supp","exp","ret","po","users","inv_n","inv_periods"];
+  keys.forEach(k=>localStorage.removeItem("vs_"+k+"_"+id));
+  await savePortalData(PD);
   renderSAPanel();
   renderStores();
   updateStats();
 }
 
-function saDeleteAllDemoStores(){
+async function saDeleteAllDemoStores(){
   if(!confirm("حذف المتاجر التجريبية (demo1, demo2, demo3)؟"))return;
   PD.stores=PD.stores.filter(s=>!s.id.startsWith("demo"));
-  savePortalData(PD);
+  await savePortalData(PD);
   renderSAPanel();
   renderStores();
   updateStats();
@@ -2182,7 +2266,10 @@ function saWipeAll(){
 // ═══════════════════════════════════════════════════════════
 // INIT
 // ═══════════════════════════════════════════════════════════
-function initPortal(){
+async function initPortal(){
+  await loadPortalData();
+  document.getElementById("cloud-loading")?.remove();
+  _portalReady=true;
   updateStats();
   renderStores();
   renderAuthCard();
