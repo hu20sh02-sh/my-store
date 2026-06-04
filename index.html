@@ -278,10 +278,15 @@ button{font-family:inherit;font-size:14px;cursor:pointer;border-radius:10px;bord
   <div class="portal-bg"></div>
 
   <header class="portal-header">
-    <div class="portal-logo">🏪 متاجري<span>بوابة المتاجر الذكية</span></div>
+    <div style="display:flex;align-items:center;gap:12px;">
+      <div style="width:40px;height:40px;border-radius:12px;background:linear-gradient(135deg,#7c6cfa,#5eead4);display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0;box-shadow:0 4px 14px rgba(124,108,250,.4);">🏪</div>
+      <div>
+        <div style="font-size:17px;font-weight:900;letter-spacing:-0.5px;background:linear-gradient(90deg,#7c6cfa,#5eead4);-webkit-background-clip:text;-webkit-text-fill-color:transparent;line-height:1.2;">متاجري</div>
+        <div style="font-size:10px;color:var(--sub);letter-spacing:0.5px;line-height:1;">بوابة المتاجر الذكية والاحترافية</div>
+      </div>
+    </div>
     <nav class="portal-nav">
       <button class="pnav-btn" onclick="scrollToSection('features')">المميزات</button>
-      <button class="pnav-btn" onclick="scrollToSection('stores-dir')">المتاجر</button>
       <button class="pnav-btn active" onclick="scrollToSection('auth-sec')">ابدأ مجاناً</button>
     </nav>
   </header>
@@ -290,49 +295,72 @@ button{font-family:inherit;font-size:14px;cursor:pointer;border-radius:10px;bord
 
     <!-- Hero -->
     <section class="portal-hero">
-      <div class="hero-badge">✨ منصة إدارة المتاجر الأولى عراقياً</div>
+      <div class="hero-badge">✨ بوابة المتاجر الذكية والاحترافية</div>
+      <div style="display:flex;align-items:center;justify-content:center;margin-bottom:1.5rem;">
+        <div style="width:80px;height:80px;border-radius:22px;background:linear-gradient(135deg,#7c6cfa,#5eead4);display:flex;align-items:center;justify-content:center;font-size:38px;box-shadow:0 8px 32px rgba(124,108,250,.45);">🏪</div>
+      </div>
       <h1 class="hero-title">
-        أنشئ متجرك الاحترافي<br>
-        <span class="grad">في دقيقتين فقط</span>
+        <span class="grad">متاجري</span>
       </h1>
-      <p class="hero-sub">نظام متكامل لإدارة المخزون، المبيعات، الحسابات والتقارير — لكل نوع من المتاجر والشركات.</p>
+      <p style="font-size:18px;font-weight:600;color:var(--text);margin-bottom:.5rem;letter-spacing:-0.3px;">بوابة المتاجر الذكية والاحترافية</p>
+      <p class="hero-sub">نظام متكامل لإدارة المخزون، المبيعات، الحسابات والتقارير — لكل نوع من المتاجر والشركات في العراق.</p>
       <div class="hero-btns">
         <button class="btn-hero-primary" onclick="scrollToSection('auth-sec')">🚀 أنشئ متجرك مجاناً</button>
-        <button class="btn-hero-sec" onclick="scrollToSection('stores-dir')">👀 شاهد المتاجر</button>
+        <button class="btn-hero-sec" onclick="scrollToSection('features')">✨ اكتشف المميزات</button>
       </div>
     </section>
 
-    <!-- Stats -->
-    <div class="stats-bar">
-      <div class="stat-item"><div class="stat-num" id="cnt-stores">0</div><div class="stat-lbl">متجر مسجل</div></div>
-      <div class="stat-item"><div class="stat-num" id="cnt-sales">0</div><div class="stat-lbl">عملية بيع</div></div>
-      <div class="stat-item"><div class="stat-num" id="cnt-products">0</div><div class="stat-lbl">منتج مضاف</div></div>
-      <div class="stat-item"><div class="stat-num">99%</div><div class="stat-lbl">رضا العملاء</div></div>
-    </div>
+    <!-- Stats hidden from public view -->
 
     <!-- Features -->
-    <section id="features" style="padding:0 0 2rem;">
-      <h2 style="text-align:center;font-size:22px;font-weight:800;margin-bottom:1.5rem;">كل ما تحتاجه في مكان واحد</h2>
+    <section id="features" style="padding:0 0 3rem;">
+      <h2 style="text-align:center;font-size:22px;font-weight:800;margin-bottom:.5rem;">كل ما تحتاجه في مكان واحد</h2>
+      <p style="text-align:center;color:var(--sub);font-size:13px;margin-bottom:2rem;">مميزات متكاملة مصممة خصيصاً للسوق العراقي</p>
       <div class="features-grid">
-        <div class="feat-card"><div class="feat-icon">📦</div><div class="feat-title">إدارة المخزون</div><div class="feat-desc">تتبع المنتجات والكميات مع تنبيهات المخزون المنخفض</div></div>
-        <div class="feat-card"><div class="feat-icon">💰</div><div class="feat-title">نقطة البيع</div><div class="feat-desc">تسجيل المبيعات بسرعة مع دعم الفواتير والديون</div></div>
-        <div class="feat-card"><div class="feat-icon">📊</div><div class="feat-title">تقارير ذكية</div><div class="feat-desc">تحليلات الأرباح والمصروفات تصدير Excel و PDF</div></div>
-        <div class="feat-card"><div class="feat-icon">👥</div><div class="feat-title">إدارة الموظفين</div><div class="feat-desc">صلاحيات متعددة: مدير، محاسب، موظف مخزن</div></div>
-        <div class="feat-card"><div class="feat-icon">💳</div><div class="feat-title">إدارة الديون</div><div class="feat-desc">تتبع الديون وإشعارات الأقساط للعملاء</div></div>
-        <div class="feat-card"><div class="feat-icon">☁️</div><div class="feat-title">مزامنة سحابية</div><div class="feat-desc">بياناتك محفوظة على Google Sheets تلقائياً</div></div>
+        <div class="feat-card" style="position:relative;overflow:hidden;">
+          <div style="position:absolute;top:12px;left:12px;width:24px;height:24px;border-radius:6px;background:rgba(124,108,250,.2);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:900;color:var(--ac);">1</div>
+          <div class="feat-icon">📦</div><div class="feat-title">إدارة المخزون الذكية</div>
+          <div class="feat-desc">تتبع المنتجات والكميات لحظة بلحظة مع تنبيهات تلقائية عند نفاد المخزون</div>
+        </div>
+        <div class="feat-card" style="position:relative;overflow:hidden;">
+          <div style="position:absolute;top:12px;left:12px;width:24px;height:24px;border-radius:6px;background:rgba(34,197,94,.2);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:900;color:#22c55e;">2</div>
+          <div class="feat-icon">⚡</div><div class="feat-title">البيع السريع والفواتير</div>
+          <div class="feat-desc">نقطة بيع سريعة مع فواتير احترافية مطبوعة بعلامتك التجارية</div>
+        </div>
+        <div class="feat-card" style="position:relative;overflow:hidden;">
+          <div style="position:absolute;top:12px;left:12px;width:24px;height:24px;border-radius:6px;background:rgba(245,158,11,.2);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:900;color:#f59e0b;">3</div>
+          <div class="feat-icon">📊</div><div class="feat-title">تقارير وحسابات ذكية</div>
+          <div class="feat-desc">تحليلات الأرباح والمصروفات الشهرية مع تصدير Excel و PDF</div>
+        </div>
+        <div class="feat-card" style="position:relative;overflow:hidden;">
+          <div style="position:absolute;top:12px;left:12px;width:24px;height:24px;border-radius:6px;background:rgba(6,182,212,.2);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:900;color:#06b6d4;">4</div>
+          <div class="feat-icon">👥</div><div class="feat-title">إدارة الفريق والصلاحيات</div>
+          <div class="feat-desc">أضف موظفين ومحاسبين بصلاحيات مخصصة لكل دور</div>
+        </div>
+        <div class="feat-card" style="position:relative;overflow:hidden;">
+          <div style="position:absolute;top:12px;left:12px;width:24px;height:24px;border-radius:6px;background:rgba(244,63,94,.2);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:900;color:#f43f5e;">5</div>
+          <div class="feat-icon">💳</div><div class="feat-title">إدارة الديون والموردين</div>
+          <div class="feat-desc">تتبع ديون العملاء وفواتير الموردين في مكان واحد</div>
+        </div>
+        <div class="feat-card" style="position:relative;overflow:hidden;">
+          <div style="position:absolute;top:12px;left:12px;width:24px;height:24px;border-radius:6px;background:rgba(94,234,212,.2);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:900;color:#5eead4;">6</div>
+          <div class="feat-icon">☁️</div><div class="feat-title">مزامنة سحابية فورية</div>
+          <div class="feat-desc">بياناتك محفوظة ومزامنة بين جميع أجهزتك تلقائياً</div>
+        </div>
+        <div class="feat-card" style="position:relative;overflow:hidden;">
+          <div style="position:absolute;top:12px;left:12px;width:24px;height:24px;border-radius:6px;background:rgba(124,108,250,.2);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:900;color:var(--ac);">7</div>
+          <div class="feat-icon">📦</div><div class="feat-title">نظام الجرد الدوري</div>
+          <div class="feat-desc">إغلاق الدورات المالية وأرشفة الحسابات الشهرية بضغطة واحدة</div>
+        </div>
+        <div class="feat-card" style="position:relative;overflow:hidden;">
+          <div style="position:absolute;top:12px;left:12px;width:24px;height:24px;border-radius:6px;background:rgba(34,197,94,.2);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:900;color:#22c55e;">8</div>
+          <div class="feat-icon">🇮🇶</div><div class="feat-title">دينار عراقي بالكامل</div>
+          <div class="feat-desc">جميع الأسعار والحسابات بالدينار العراقي دون أي تحويل</div>
+        </div>
       </div>
     </section>
 
-    <!-- Stores Directory -->
-    <section id="stores-dir" class="stores-section">
-      <div class="stores-header">
-        <h2 class="sec-title">🏪 المتاجر المسجلة</h2>
-        <input class="search-stores" placeholder="ابحث عن متجر..." oninput="filterStores(this.value)" id="storeSearch"/>
-      </div>
-      <div class="stores-grid" id="storesGrid">
-        <!-- filled by JS -->
-      </div>
-    </section>
+    <!-- Stores directory: hidden from public — visible in Super Admin panel only -->
 
     <!-- Auth -->
     <section id="auth-sec" class="auth-section">
@@ -362,15 +390,34 @@ button{font-family:inherit;font-size:14px;cursor:pointer;border-radius:10px;bord
 // PORTAL STATE & DATA
 // ═══════════════════════════════════════════════════════════
 const PORTAL_KEY="matajer_portal";
-const STORE_CATS=["متجر إلكترونيات","متجر ملابس","صيدلية","مطعم / كافيه","متجر عام","محل موبايلات","متجر فيب وشيشة","مولات سكنية","مخزن","أخرى"];
+const STORE_CATS=["متجر إلكترونيات","متجر ملابس","صيدلية","مطعم / كافيه","متجر عام","محل موبايلات","متجر فيب وشيشة","مولات سكنية","مخزن","كوزمتيك / عطور","محل حلاقة / صالون","بقالة / سوبرماركت","محل إطارات / قطع غيار","مكتبة / قرطاسية","مجوهرات / ساعات","محل أثاث / ديكور","بناء / مواد بناء","محل رياضة","أخرى"];
 const STORE_COLORS={
   indigo:"#6366f1",violet:"#7c3aed",cyan:"#06b6d4",emerald:"#10b981",
   rose:"#f43f5e",amber:"#f59e0b",orange:"#f97316",sky:"#0ea5e9"
 };
 const STORE_EMOJIS={
-  "متجر إلكترونيات":"🖥️","متجر ملابس":"👕","صيدلية":"💊","مطعم / كافيه":"☕",
-  "متجر عام":"🏪","محل موبايلات":"📱","متجر فيب وشيشة":"💨","مولات سكنية":"🏢","مخزن":"📦","أخرى":"🛍️"
+  "متجر إلكترونيات":"🖥️",
+  "متجر ملابس":"👗",
+  "صيدلية":"💊",
+  "مطعم / كافيه":"☕",
+  "متجر عام":"🏪",
+  "محل موبايلات":"📱",
+  "متجر فيب وشيشة":"💨",
+  "مولات سكنية":"🏢",
+  "مخزن":"📦",
+  "كوزمتيك / عطور":"💄",
+  "محل حلاقة / صالون":"✂️",
+  "بقالة / سوبرماركت":"🛒",
+  "محل إطارات / قطع غيار":"🔧",
+  "مكتبة / قرطاسية":"📚",
+  "مجوهرات / ساعات":"💍",
+  "محل أثاث / ديكور":"🛋️",
+  "بناء / مواد بناء":"🧱",
+  "محل رياضة":"⚽",
+  "أخرى":"🛍️"
 };
+// Expand STORE_CATS to include new types
+const STORE_CATS_EXTRA=["كوزمتيك / عطور","محل حلاقة / صالون","بقالة / سوبرماركت","محل إطارات / قطع غيار","مكتبة / قرطاسية","مجوهرات / ساعات","محل أثاث / ديكور","بناء / مواد بناء","محل رياضة"];
 const PLANS={
   free:{label:"مجاني",price:"0",color:"#22c55e",maxProducts:50,maxUsers:2},
   pro:{label:"احترافي",price:"15$/شهر",color:"#6366f1",maxProducts:500,maxUsers:10},
@@ -450,12 +497,7 @@ function animateCount(el,target,suffix=""){
   const iv=setInterval(()=>{cur=Math.min(cur+step,target);el.textContent=cur+(suffix);if(cur>=target)clearInterval(iv);},30);
 }
 function updateStats(){
-  const total=PD.stores.length;
-  const totalSales=PD.stores.reduce((a,s)=>a+(s.salesCount||0),0);
-  const totalProds=PD.stores.reduce((a,s)=>a+(s.productsCount||0),0);
-  animateCount(document.getElementById("cnt-stores"),total);
-  animateCount(document.getElementById("cnt-sales"),totalSales);
-  animateCount(document.getElementById("cnt-products"),totalProds);
+  // Stats are shown in SA panel only — no public counters
 }
 
 // Stores directory
@@ -490,10 +532,7 @@ function loginToStore(id){
   const s=PD.stores.find(x=>x.id===id);if(!s)return;
   activeTab="login";
   switchTab("login");
-  document.getElementById("storeSearch").value="";
-  renderStores();
-  PS.loginStoreId=id;
-  PS.selectedStore=s;
+  PS.lStoreName=s.name;
   renderAuthCard();
   scrollToSection("auth-sec");
 }
@@ -507,9 +546,9 @@ const PS={
   cPass:"",cPass2:"",cAPI:"",cErr:"",cCats:"",cExpCats:"",
   cOk:"",
   // login
-  loginStoreId:"",selectedStore:null,lPhone:"",lPass:"",lErr:"",
+  loginStoreId:"",lStoreName:"",selectedStore:null,lPhone:"",lPass:"",lErr:"",
   // register (employee self-register)
-  regStoreId:"",regName:"",regPhone:"",regRole:"staff",regPass:"",regPass2:"",regErr:"",regOk:false,
+  regStoreId:"",regStoreName:"",regName:"",regPhone:"",regRole:"staff",regPass:"",regPass2:"",regErr:"",regOk:false,
 };
 
 function renderAuthCard(){
@@ -582,18 +621,22 @@ function renderCreateForm(c){
 }
 
 function renderLoginForm(c){
-  const stores=PD.stores;
-  const storeOpts=stores.map(s=>`<option value="${s.id}" ${PS.loginStoreId===s.id?"selected":""} ${s.banned?"disabled":""} >${s.name}${s.banned?" 🚫 (محظور)":""}</option>`).join("");
+  // Find matching store as user types name (case-insensitive, trimmed)
+  const matchedStore=PS.lStoreName?.trim()
+    ? PD.stores.find(s=>s.name.trim()===PS.lStoreName.trim())
+    : null;
+  const storeEmoji=matchedStore?(STORE_EMOJIS[matchedStore.category]||"🏪"):"";
   c.innerHTML=`
     <h2 class="auth-title">🔑 الدخول إلى متجرك</h2>
-    <p class="auth-sub">اختر متجرك وأدخل بيانات الدخول</p>
+    <p class="auth-sub">أدخل اسم متجرك مع بيانات الدخول</p>
     ${PS.lErr?`<div class="auth-err">${PS.lErr}</div>`:""}
     <div class="field-group">
-      <label>اختر المتجر</label>
-      <select onchange="PS.loginStoreId=this.value;PS.selectedStore=PD.stores.find(s=>s.id===this.value)||null;renderAuthCard()">
-        <option value="">— اختر متجراً —</option>
-        ${storeOpts}
-      </select>
+      <label>اسم المتجر</label>
+      <input value="${PS.lStoreName||""}" oninput="PS.lStoreName=this.value;renderAuthCard()" placeholder="أدخل اسم متجرك بالضبط..."/>
+      ${matchedStore?`<div style="margin-top:6px;padding:8px 12px;background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.2);border-radius:8px;font-size:12px;color:#22c55e;display:flex;align-items:center;gap:6px;">
+        <span style="font-size:18px;">${storeEmoji}</span>
+        <span>تم التعرف على: <strong>${matchedStore.name}</strong></span>
+      </div>`:`<div style="margin-top:6px;font-size:11px;color:var(--sub);">تأكد من كتابة الاسم كما هو مسجل في النظام</div>`}
     </div>
     <div class="field-group">
       <label>رقم الهاتف</label>
@@ -603,9 +646,6 @@ function renderLoginForm(c){
       <label>كلمة المرور</label>
       <input type="password" value="${PS.lPass}" oninput="PS.lPass=this.value" placeholder="••••••••"/>
     </div>
-    ${PS.selectedStore?`<p style="font-size:12px;color:var(--sub);margin-bottom:.75rem;text-align:center;">
-      ${STORE_EMOJIS[PS.selectedStore.category]||"🏪"} ${PS.selectedStore.name} — <span style="color:${PLANS[PS.selectedStore.plan].color}">${PLANS[PS.selectedStore.plan].label}</span>
-    </p>`:""}
     <button class="btn-auth" onclick="doLogin()">🚪 الدخول</button>
     <p style="text-align:center;font-size:12px;color:var(--sub);margin-top:.75rem;">
       ليس لديك متجر؟ <a href="#" style="color:var(--ac);text-decoration:none;" onclick="switchTab('create');return false;">أنشئ الآن مجاناً</a>
@@ -663,12 +703,24 @@ function getCatsByType(type){
     "متجر فيب وشيشة":{cats:["جهاز فيب","سائل إلكتروني","شيشة","معسل","فحم","إكسسوارات","أخرى"],expCats:["عام","إيجار","رواتب","كهرباء","نقل","أخرى"]},
     "مولات سكنية":{cats:["شقق","محلات","مرافق","خدمات","أخرى"],expCats:["عام","إيجار","رواتب","صيانة","كهرباء","أخرى"]},
   };
-  return m[type]||{cats:["منتجات","أخرى"],expCats:["عام","إيجار","رواتب","أخرى"]};
+  const cosmCats={cats:["عطور","كريمات","مكياج","منتجات شعر","إكسسوارات","أخرى"],expCats:["عام","إيجار","رواتب","كهرباء","أخرى"]};
+  const extraMap={
+    "كوزمتيك / عطور":cosmCats,
+    "محل حلاقة / صالون":{cats:["خدمات حلاقة","منتجات شعر","عطور","أخرى"],expCats:["عام","إيجار","رواتب","أخرى"]},
+    "بقالة / سوبرماركت":{cats:["مواد غذائية","مشروبات","منظفات","أخرى"],expCats:["عام","إيجار","رواتب","كهرباء","أخرى"]},
+    "محل إطارات / قطع غيار":{cats:["إطارات","قطع غيار","زيوت","إكسسوارات","أخرى"],expCats:["عام","إيجار","رواتب","أخرى"]},
+    "مكتبة / قرطاسية":{cats:["كتب","قرطاسية","أدوات مكتبية","أخرى"],expCats:["عام","إيجار","رواتب","أخرى"]},
+    "مجوهرات / ساعات":{cats:["ذهب","فضة","ساعات","إكسسوارات","أخرى"],expCats:["عام","إيجار","رواتب","أخرى"]},
+    "محل أثاث / ديكور":{cats:["أثاث غرف","ديكور","إضاءة","أخرى"],expCats:["عام","إيجار","رواتب","نقل","أخرى"]},
+    "بناء / مواد بناء":{cats:["طابوق","سيراميك","حديد","أسمنت","دهان","أخرى"],expCats:["عام","إيجار","رواتب","نقل","أخرى"]},
+    "محل رياضة":{cats:["أدوات رياضية","ملابس رياضية","أحذية","مكملات","أخرى"],expCats:["عام","إيجار","رواتب","أخرى"]},
+  };
+  return m[type]||extraMap[type]||{cats:["منتجات","أخرى"],expCats:["عام","إيجار","رواتب","أخرى"]};
 }
 
 
 function renderRegisterForm(c){
-  const storeOpts=PD.stores.map(s=>`<option value="${s.id}" ${PS.regStoreId===s.id?"selected":""}>${STORE_EMOJIS[s.category]||"🏪"} ${s.name}</option>`).join("");
+  // Keep select hidden — only approved stores shown by name for employees
   const roles=[["staff","موظف"],["accountant","محاسب"],["warehouse","موظف مخزن"]];
   c.innerHTML=`
     <div class="auth-title">👤 تسجيل موظف جديد</div>
@@ -676,11 +728,9 @@ function renderRegisterForm(c){
     ${PS.regErr?`<div class="auth-err">${PS.regErr}</div>`:""}
     ${PS.regOk?`<div class="auth-ok">✅ تم إرسال طلبك! انتظر موافقة المدير ثم سجّل الدخول.</div>`:""}
     <div class="field-group">
-      <label>اختر المتجر</label>
-      <select onchange="PS.regStoreId=this.value;renderAuthCard()">
-        <option value="">— اختر المتجر —</option>
-        ${storeOpts}
-      </select>
+      <label>اسم المتجر</label>
+      <input value="${PS.regStoreName||""}" oninput="PS.regStoreName=this.value;renderAuthCard()" placeholder="أدخل اسم المتجر بالضبط..."/>
+      ${(()=>{const ms=PD.stores.find(s=>s.name.trim()===(PS.regStoreName||"").trim());return ms?`<div style="margin-top:5px;font-size:12px;color:#22c55e;">✅ تم التعرف على: ${ms.name}</div>`:`<div style="margin-top:5px;font-size:11px;color:var(--sub);">أدخل الاسم كما هو مسجل</div>`;})()}
     </div>
     <div class="field-group">
       <label>الاسم الكامل</label>
@@ -709,7 +759,8 @@ function renderRegisterForm(c){
 }
 function doRegisterEmployee(){
   PS.regErr="";PS.regOk=false;
-  if(!PS.regStoreId){PS.regErr="اختر المتجر";renderAuthCard();return;}
+  PS.regStoreId=(PD.stores.find(s=>s.name.trim()===(PS.regStoreName||"").trim())||{}).id||"";
+  if(!PS.regStoreId){PS.regErr="اسم المتجر غير موجود — تأكد من الكتابة";renderAuthCard();return;}
   if(!PS.regName.trim()||!PS.regPhone.trim()||!PS.regPass.trim()){PS.regErr="أكمل جميع الحقول";renderAuthCard();return;}
   if(PS.regPass!==PS.regPass2){PS.regErr="كلمة المرور غير متطابقة";renderAuthCard();return;}
   const storeKey="vs_users_"+PS.regStoreId;
@@ -725,10 +776,10 @@ function doRegisterEmployee(){
 }
 function doLogin(){
   PS.lErr="";
-  if(!PS.loginStoreId){PS.lErr="اختر متجراً";renderAuthCard();return;}
+  if(!(PS.lStoreName||"").trim()){PS.lErr="أدخل اسم المتجر";renderAuthCard();return;}
   if(!PS.lPhone.trim()||!PS.lPass.trim()){PS.lErr="أكمل بيانات الدخول";renderAuthCard();return;}
-  const store=PD.stores.find(s=>s.id===PS.loginStoreId);
-  if(!store){PS.lErr="المتجر غير موجود";renderAuthCard();return;}
+  const store=PD.stores.find(s=>s.name.trim()===PS.lStoreName.trim());
+  if(!store){PS.lErr="اسم المتجر غير موجود — تأكد من الكتابة الصحيحة";renderAuthCard();return;}
   if(store.banned){PS.lErr="🚫 هذا المتجر محظور. تواصل مع الإدارة.";renderAuthCard();return;}
   // Check all users in store's local storage
   const storeUsers=ls("vs_users_"+store.id,[{id:"1",name:store.ownerName,phone:store.adminPhone,password:store.adminPass,role:"admin",status:"approved",perms:ADMIN_PERMS}]);
@@ -2072,9 +2123,12 @@ function renderSAPanel(panel){
 
   if(saTab==="stores"){
     body.innerHTML=`
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.25rem;flex-wrap:wrap;gap:.5rem;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.75rem;flex-wrap:wrap;gap:.5rem;">
       <h2 style="font-size:17px;font-weight:800;">🏪 جميع المتاجر (${stores.length})</h2>
-      <button onclick="saDeleteAllDemoStores()" style="padding:7px 14px;border-radius:9px;border:1px solid rgba(244,63,94,.3);background:transparent;color:#f43f5e;font-size:13px;cursor:pointer;font-family:inherit;">🗑 حذف المتاجر التجريبية</button>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <input id="sa-store-search" placeholder="🔍 ابحث عن متجر..." oninput="saFilterStores(this.value)" style="padding:7px 12px;border-radius:9px;border:1px solid #252839;background:#10131f;color:#eceef6;font-size:13px;font-family:inherit;outline:none;width:180px;direction:rtl;"/>
+        <button onclick="saDeleteAllDemoStores()" style="padding:7px 14px;border-radius:9px;border:1px solid rgba(244,63,94,.3);background:transparent;color:#f43f5e;font-size:13px;cursor:pointer;font-family:inherit;">🗑 حذف التجريبية</button>
+      </div>
     </div>
     <div style="background:#10131f;border-radius:14px;border:1px solid #252839;overflow:hidden;">
       <table style="width:100%;border-collapse:collapse;font-size:13px;">
@@ -2089,7 +2143,7 @@ function renderSAPanel(panel){
             <th style="padding:10px 14px;text-align:center;color:#6b7280;font-weight:600;">الإجراءات</th>
           </tr>
         </thead>
-        <tbody>
+        <tbody id="sa-stores-tbody">
           ${stores.map((s,i)=>{
             const planInfo=PLANS[s.plan]||PLANS.free;
             const emoji=STORE_EMOJIS[s.category]||"🏪";
@@ -2212,6 +2266,14 @@ function renderSAPanel(panel){
       </div>
     </div>`;
   }
+}
+
+function saFilterStores(q){
+  const rows=document.querySelectorAll("#sa-stores-tbody tr");
+  rows.forEach(row=>{
+    const txt=row.textContent.toLowerCase();
+    row.style.display=txt.includes(q.toLowerCase())?"":"none";
+  });
 }
 
 async function saToggleBan(id){
