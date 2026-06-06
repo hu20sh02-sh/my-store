@@ -424,42 +424,105 @@ const PLANS={
   business:{label:"أعمال",price:"35$/شهر",color:"#f59e0b",maxProducts:-1,maxUsers:-1},
 };
 
-// ── Cloud sync via JSONBin.io ─────────────────────────────────────────────────
-// BIN stores: { stores:[], pendingStores:[] }
-const JSONBIN_BIN_ID="685991728561e97a500e85b1";
-const JSONBIN_API_KEY="$2a$10$9FRw6HJXAuJfm8uiQrX5S.OXVGAqfGpvFUAVb4H3Hxco.lHOV0i5C";
-const JSONBIN_URL="https://api.jsonbin.io/v3/b/"+JSONBIN_BIN_ID;
+// ══════════════════════════════════════════════════════════════════════════════
+// Cloud sync — SECURE MODE (via Cloudflare Worker proxy)
+// ──────────────────────────────────────────────────────────────────────────────
+// لا يوجد أي مفتاح JSONBin في هذه الصفحة. المفتاح محفوظ داخل الـ Worker على الخادم.
+// الصفحة تكلّم الـ Worker فقط، والـ Worker هو من يكلّم JSONBin بالمفتاح السري.
+//
+// خطوات الإعداد (مرة واحدة):
+//   1) أنشئ حساب مجاني على https://dash.cloudflare.com  ثم Workers & Pages > Create Worker
+//   2) الصق كود الـ Worker الذي زوّدتك به، وضع مفتاح JSONBin و BIN_ID في إعداداته (Variables)
+//   3) انشر الـ Worker وانسخ رابطه (مثال: https://matajer-sync.YOURNAME.workers.dev)
+//   4) ضع الرابط في CLOUD_WORKER_URL أدناه
+//
+// إذا تركت CLOUD_WORKER_URL فارغاً: التطبيق يعمل بالكامل محلياً (localStorage) بدون أخطاء.
+const CLOUD_WORKER_URL="https://quiet-voice-d017matajer-sync.hu20sh02.workers.dev"; // Cloudflare Worker proxy — المفتاح محفوظ في الخادم
+
+const CLOUD_TIMEOUT=8000;   // أقصى انتظار للسحابة (مللي ثانية) — يمنع تعليق التحميل
+const IS_FILE=location.protocol==="file:"; // فتح الملف محلياً بدون خادم
+const CLOUD_ON=!!CLOUD_WORKER_URL && !IS_FILE; // السحابة تعمل فقط مع رابط Worker ومن خادم حقيقي
 let _cloudSaving=false;
-let _localFallback=false;
+let _saveQueued=false;
+window.CLOUD_STATUS="local"; // "local" | "cloud" | "error" — للعرض في الواجهة
+
+// fetch مع مهلة زمنية حتى لا يتجمد التطبيق إذا تأخرت الشبكة
+function fetchTimeout(url,opts={},ms=CLOUD_TIMEOUT){
+  const ctrl=new AbortController();
+  const t=setTimeout(()=>ctrl.abort(),ms);
+  return fetch(url,{...opts,signal:ctrl.signal}).finally(()=>clearTimeout(t));
+}
+
+// التحقق من سلامة البيانات قبل الوثوق بها (يمنع كتابة سحابية فاسدة من إفساد التطبيق)
+function isValidPD(d){return d&&typeof d==="object"&&Array.isArray(d.stores);}
+
+// نسخة احتياطية محلية آمنة — تُحفظ نسخة سابقة قبل أي استبدال
+function backupLocal(){
+  try{
+    const cur=localStorage.getItem(PORTAL_KEY);
+    if(cur)localStorage.setItem(PORTAL_KEY+"_backup",cur);
+  }catch{}
+}
 
 async function loadPortalData(){
-  try{
-    const r=await fetch(JSONBIN_URL+"/latest",{headers:{"X-Master-Key":JSONBIN_API_KEY,"X-Bin-Meta":"false"}});
-    if(!r.ok)throw new Error("fetch failed");
-    const d=await r.json();
-    if(d&&Array.isArray(d.stores)){
-      PD=d;
-      if(!PD.pendingStores)PD.pendingStores=[];
-      localStorage.setItem(PORTAL_KEY,JSON.stringify(PD));// local cache
-      return true;
+  // 1) السحابة (إن كانت مُفعّلة)
+  if(CLOUD_ON){
+    try{
+      const r=await fetchTimeout(CLOUD_WORKER_URL+"?action=load");
+      if(!r.ok)throw new Error("cloud "+r.status);
+      const d=await r.json();
+      if(isValidPD(d)){
+        PD=d;
+        if(!PD.pendingStores)PD.pendingStores=[];
+        backupLocal();
+        localStorage.setItem(PORTAL_KEY,JSON.stringify(PD)); // تخزين محلي كنسخة مؤقتة
+        window.CLOUD_STATUS="cloud";
+        return true;
+      }
+      throw new Error("invalid cloud payload");
+    }catch(e){
+      console.warn("تعذّر التحميل من السحابة، سيتم استخدام النسخة المحلية:",e.message||e);
+      window.CLOUD_STATUS="error";
     }
-  }catch(e){console.warn("Cloud load failed, using local cache",e);}
-  // fallback to localStorage
-  try{const v=localStorage.getItem(PORTAL_KEY);if(v){PD=JSON.parse(v);if(!PD.pendingStores)PD.pendingStores=[];return false;}}catch{}
+  }
+  // 2) النسخة المحلية (fallback أو الوضع المحلي الكامل)
+  try{
+    const v=localStorage.getItem(PORTAL_KEY);
+    if(v){
+      const d=JSON.parse(v);
+      if(isValidPD(d)){PD=d;if(!PD.pendingStores)PD.pendingStores=[];return false;}
+    }
+  }catch{}
+  // 3) لا توجد بيانات — ابدأ فارغاً
   PD={stores:[],pendingStores:[]};
   return false;
 }
 
 async function savePortalData(d){
+  // تحقق من السلامة قبل أي حفظ
+  if(!isValidPD(d)){console.warn("رفض حفظ بيانات غير صالحة");return;}
   PD=d;
   if(!PD.pendingStores)PD.pendingStores=[];
-  localStorage.setItem(PORTAL_KEY,JSON.stringify(PD));// always save locally too
-  if(_cloudSaving)return;
+  // الحفظ المحلي دائماً أولاً (مضمون حتى بدون إنترنت)
+  backupLocal();
+  try{localStorage.setItem(PORTAL_KEY,JSON.stringify(PD));}catch{}
+  // ثم المزامنة السحابية إن كانت مفعّلة
+  if(!CLOUD_ON)return;
+  if(_cloudSaving){_saveQueued=true;return;} // تفادي تداخل عمليات الحفظ
   _cloudSaving=true;
   try{
-    await fetch(JSONBIN_URL,{method:"PUT",headers:{"Content-Type":"application/json","X-Master-Key":JSONBIN_API_KEY},body:JSON.stringify(PD)});
-  }catch(e){console.warn("Cloud save failed",e);}
+    const r=await fetchTimeout(CLOUD_WORKER_URL+"?action=save",{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify(PD),
+    });
+    window.CLOUD_STATUS=r.ok?"cloud":"error";
+  }catch(e){
+    console.warn("تعذّر الحفظ في السحابة (حُفظ محلياً):",e.message||e);
+    window.CLOUD_STATUS="error";
+  }
   _cloudSaving=false;
+  if(_saveQueued){_saveQueued=false;savePortalData(PD);} // نفّذ آخر حفظ مؤجّل
 }
 
 function getPortalData(){return PD;}// kept for compat
@@ -468,13 +531,16 @@ let PD={stores:[],pendingStores:[]};
 let activeTab="create";
 let _portalReady=false;
 
-// Show loading overlay until cloud data loads
+// Show loading overlay until data loads
 (function(){
   const ov=document.createElement("div");
   ov.id="cloud-loading";
   ov.style.cssText="position:fixed;inset:0;background:#0a0c14;z-index:99997;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;";
-  ov.innerHTML='<div style="font-size:40px;">☁️</div><div style="font-size:16px;font-weight:700;color:#eceef6;">جاري تحميل البيانات...</div><div style="font-size:12px;color:#6b7280;">مزامنة مع السحابة</div>';
+  const sub=CLOUD_ON?"مزامنة مع السحابة":"وضع محلي";
+  ov.innerHTML='<div style="font-size:40px;">'+(CLOUD_ON?'☁️':'💾')+'</div><div style="font-size:16px;font-weight:700;color:#eceef6;">جاري تحميل البيانات...</div><div style="font-size:12px;color:#6b7280;">'+sub+'</div>';
   document.body.appendChild(ov);
+  // أمان إضافي: أزل شاشة التحميل بعد مهلة قصوى مهما حصل
+  setTimeout(()=>{const x=document.getElementById("cloud-loading");if(x)x.remove();},CLOUD_TIMEOUT+2000);
 })();
 
 // ═══════════════════════════════════════════════════════════
@@ -621,22 +687,35 @@ function renderCreateForm(c){
 }
 
 function renderLoginForm(c){
-  // Find matching store as user types name (case-insensitive, trimmed)
   const matchedStore=PS.lStoreName?.trim()
     ? PD.stores.find(s=>s.name.trim()===PS.lStoreName.trim())
     : null;
   const storeEmoji=matchedStore?(STORE_EMOJIS[matchedStore.category]||"🏪"):"";
+
+  // إذا الحقل موجود مسبقاً — حدّث فقط الـ hint بدون إعادة رسم كامل
+  const existingInp=c.querySelector("#ls-store-name");
+  if(existingInp){
+    const hint=c.querySelector("#ls-store-hint");
+    if(hint){
+      hint.innerHTML=matchedStore
+        ?`<div style="margin-top:6px;padding:8px 12px;background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.2);border-radius:8px;font-size:12px;color:#22c55e;display:flex;align-items:center;gap:6px;"><span style="font-size:18px;">${storeEmoji}</span><span>تم التعرف على: <strong>${matchedStore.name}</strong></span></div>`
+        :`<div style="margin-top:6px;font-size:11px;color:var(--sub);">تأكد من كتابة الاسم كما هو مسجل في النظام</div>`;
+    }
+    return; // لا تعيد رسم كل شيء
+  }
+
   c.innerHTML=`
     <h2 class="auth-title">🔑 الدخول إلى متجرك</h2>
     <p class="auth-sub">أدخل اسم متجرك مع بيانات الدخول</p>
     ${PS.lErr?`<div class="auth-err">${PS.lErr}</div>`:""}
     <div class="field-group">
       <label>اسم المتجر</label>
-      <input value="${PS.lStoreName||""}" oninput="PS.lStoreName=this.value;renderAuthCard()" placeholder="أدخل اسم متجرك بالضبط..."/>
-      ${matchedStore?`<div style="margin-top:6px;padding:8px 12px;background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.2);border-radius:8px;font-size:12px;color:#22c55e;display:flex;align-items:center;gap:6px;">
-        <span style="font-size:18px;">${storeEmoji}</span>
-        <span>تم التعرف على: <strong>${matchedStore.name}</strong></span>
-      </div>`:`<div style="margin-top:6px;font-size:11px;color:var(--sub);">تأكد من كتابة الاسم كما هو مسجل في النظام</div>`}
+      <input id="ls-store-name" value="${PS.lStoreName||""}" placeholder="أدخل اسم متجرك بالضبط..." autocomplete="off"/>
+      <div id="ls-store-hint">
+        ${matchedStore
+          ?`<div style="margin-top:6px;padding:8px 12px;background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.2);border-radius:8px;font-size:12px;color:#22c55e;display:flex;align-items:center;gap:6px;"><span style="font-size:18px;">${storeEmoji}</span><span>تم التعرف على: <strong>${matchedStore.name}</strong></span></div>`
+          :`<div style="margin-top:6px;font-size:11px;color:var(--sub);">تأكد من كتابة الاسم كما هو مسجل في النظام</div>`}
+      </div>
     </div>
     <div class="field-group">
       <label>رقم الهاتف</label>
@@ -652,6 +731,13 @@ function renderLoginForm(c){
       &nbsp;|&nbsp; <a href="#" style="color:var(--ac2);text-decoration:none;" onclick="switchTab('register');return false;">تسجيل موظف جديد</a>
     </p>
   `;
+  const lsInp=c.querySelector("#ls-store-name");
+  if(lsInp){
+    lsInp.addEventListener("input",e=>{
+      PS.lStoreName=e.target.value;
+      renderLoginForm(c); // يحدّث الـ hint فقط (لأن الـ input موجود مسبقاً)
+    });
+  }
 }
 
 async function createStore(){
@@ -720,8 +806,22 @@ function getCatsByType(type){
 
 
 function renderRegisterForm(c){
-  // Keep select hidden — only approved stores shown by name for employees
   const roles=[["staff","موظف"],["accountant","محاسب"],["warehouse","موظف مخزن"]];
+
+  // إذا الحقل موجود — حدّث الـ hint فقط
+  const existingInp=c.querySelector("#reg-store-name");
+  if(existingInp){
+    const hint=c.querySelector("#reg-store-hint");
+    if(hint){
+      const ms=PD.stores.find(s=>s.name.trim()===(PS.regStoreName||"").trim());
+      hint.innerHTML=ms
+        ?`<div style="margin-top:5px;font-size:12px;color:#22c55e;">✅ تم التعرف على: ${ms.name}</div>`
+        :`<div style="margin-top:5px;font-size:11px;color:var(--sub);">أدخل الاسم كما هو مسجل</div>`;
+    }
+    return;
+  }
+
+  const ms0=PD.stores.find(s=>s.name.trim()===(PS.regStoreName||"").trim());
   c.innerHTML=`
     <div class="auth-title">👤 تسجيل موظف جديد</div>
     <div class="auth-sub">سجّل نفسك كموظف في متجر موجود — يحتاج موافقة المدير</div>
@@ -729,8 +829,10 @@ function renderRegisterForm(c){
     ${PS.regOk?`<div class="auth-ok">✅ تم إرسال طلبك! انتظر موافقة المدير ثم سجّل الدخول.</div>`:""}
     <div class="field-group">
       <label>اسم المتجر</label>
-      <input value="${PS.regStoreName||""}" oninput="PS.regStoreName=this.value;renderAuthCard()" placeholder="أدخل اسم المتجر بالضبط..."/>
-      ${(()=>{const ms=PD.stores.find(s=>s.name.trim()===(PS.regStoreName||"").trim());return ms?`<div style="margin-top:5px;font-size:12px;color:#22c55e;">✅ تم التعرف على: ${ms.name}</div>`:`<div style="margin-top:5px;font-size:11px;color:var(--sub);">أدخل الاسم كما هو مسجل</div>`;})()}
+      <input id="reg-store-name" value="${PS.regStoreName||""}" placeholder="أدخل اسم المتجر بالضبط..." autocomplete="off"/>
+      <div id="reg-store-hint">
+        ${ms0?`<div style="margin-top:5px;font-size:12px;color:#22c55e;">✅ تم التعرف على: ${ms0.name}</div>`:`<div style="margin-top:5px;font-size:11px;color:var(--sub);">أدخل الاسم كما هو مسجل</div>`}
+      </div>
     </div>
     <div class="field-group">
       <label>الاسم الكامل</label>
@@ -756,6 +858,13 @@ function renderRegisterForm(c){
     </div>
     <button class="btn-auth" onclick="doRegisterEmployee()">📩 إرسال طلب الانضمام</button>
   `;
+  const regInp=c.querySelector("#reg-store-name");
+  if(regInp){
+    regInp.addEventListener("input",e=>{
+      PS.regStoreName=e.target.value;
+      renderRegisterForm(c); // يحدّث الـ hint فقط
+    });
+  }
 }
 function doRegisterEmployee(){
   PS.regErr="";PS.regOk=false;
@@ -887,6 +996,9 @@ function sNo(v){S.notes=v;ss(lsk("note"),v);}
 function sIP(v){S.invPeriods=typeof v==="function"?v(S.invPeriods):v;ss(lsk("inv_periods"),S.invPeriods);}
 function set(k,v){S[k]=v;renderApp();}
 function up(o){Object.assign(S,o);renderApp();}
+// debounce — ينتظر المستخدم يوقف الكتابة قبل الرسم (يحل مشكلة حرف واحد فقط)
+function debounce(fn,ms=120){let t;return(...a)=>{clearTimeout(t);t=setTimeout(()=>fn(...a),ms);};}
+const _deferRender=debounce(()=>renderApp(),80);
 function sqBg(q){return q<=0?"rgba(244,63,94,.15)":q<=3?"rgba(245,158,11,.15)":"rgba(34,197,94,.12)";}
 function sqC(q){return q<=0?"#f43f5e":q<=3?"#f59e0b":"#22c55e";}
 function printW(html){const w=window.open("","_blank","width=680,height=800");w.document.write(`<!DOCTYPE html><html dir="rtl"><head><meta charset="UTF-8"><style>body{font-family:Arial,sans-serif;direction:rtl;padding:30px;color:#000;position:relative;min-height:100vh;}@media print{body{padding:20px;}}.watermark{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%) rotate(-35deg);font-size:72px;font-weight:900;color:rgba(0,0,0,0.07);white-space:nowrap;pointer-events:none;z-index:0;letter-spacing:4px;}table{width:100%;border-collapse:collapse;margin:16px 0;}th,td{border:1px solid #bbb;padding:8px 12px;text-align:right;}th{background:#f0f0f0;font-weight:700;}tr:nth-child(even){background:#fafafa;}.header{text-align:center;border-bottom:3px double #333;padding-bottom:16px;margin-bottom:20px;}.store-name{font-size:28px;font-weight:900;margin-bottom:4px;letter-spacing:1px;}.inv-title{font-size:16px;color:#444;margin-bottom:6px;}.customer-box{background:#f8f8f8;border:1px solid #ddd;border-radius:6px;padding:12px 16px;margin-bottom:16px;}.footer{margin-top:24px;border-top:2px solid #333;padding-top:10px;display:flex;justify-content:space-between;font-size:13px;}.total-row td{font-size:16px;font-weight:900;background:#e8f5e9!important;}</style></head><body>${html}</body></html>`);w.document.close();setTimeout(()=>w.print(),500);}
@@ -931,7 +1043,17 @@ function span(cls,text,style){const s=document.createElement("span");if(cls)s.cl
 function lbl(t){const l=document.createElement("span");l.className="lbl";l.textContent=t;return l;}
 function card(children,style){const c=div("card",children);if(style)Object.assign(c.style,style);return c;}
 function stat(l,v,color){const c=div("stat-card");c.innerHTML=`<div class="lbl">${l}</div><div class="val" style="color:${color||"var(--text)"}">${v}</div>`;return c;}
-function mkInp(val,onchange,ph,type,style,live){const i=document.createElement("input");i.type=type||"text";i.value=val||"";if(ph)i.placeholder=ph;if(style)Object.assign(i.style,style);i.addEventListener(live?"input":"change",e=>onchange(e.target.value));return i;}
+function mkInp(val,onchange,ph,type,style,live){
+  const i=document.createElement("input");
+  i.type=type||"text";
+  i.value=val||"";
+  if(ph)i.placeholder=ph;
+  if(style)Object.assign(i.style,style);
+  // معرّف ثابت لا يتغير بتغير القيمة — لاستعادة الـ focus بعد renderApp
+  i.dataset.fid=(ph||"noph")+"__"+(type||"text");
+  i.addEventListener(live?"input":"change",e=>onchange(e.target.value));
+  return i;
+}
 function mkSel(val,opts,onchange,style){const s=document.createElement("select");if(style)Object.assign(s.style,style);(Array.isArray(opts)?opts.map(o=>typeof o==="string"?{v:o,l:o}:o):opts).forEach(o=>{const op=document.createElement("option");op.value=o.v;op.textContent=o.l;if(String(val)===String(o.v))op.selected=true;s.appendChild(op);});s.addEventListener("change",e=>onchange(e.target.value));return s;}
 function makeBtn(text,cls,onClick,style){const b=document.createElement("button");b.className=cls||"";b.innerHTML=text;if(onClick)b.addEventListener("click",onClick);if(style)Object.assign(b.style,style);return b;}
 
@@ -1107,8 +1229,8 @@ function pgAddProduct(){
     div("span2",[lbl("اسم المادة *"),mkInp(f.name,v=>{S.form.name=v;},undefined,undefined,undefined,true)]),
     div("",[lbl("التصنيف"),mkSel(f.category,CATS,v=>S.form.category=v)]),
     div("",[lbl("الكود SKU"),mkInp(f.sku||"",v=>S.form.sku=v,undefined,undefined,undefined,true)]),
-    div("",[lbl("سعر الشراء (د.ع)"),mkInp(f.buyPrice,v=>{S.form.buyPrice=v;renderApp();},"0","number",{borderColor:"#f59e0b"})]),
-    div("",[lbl("سعر البيع (د.ع)"),mkInp(f.sellPrice,v=>{S.form.sellPrice=v;renderApp();},"0","number",{borderColor:"#22c55e"})]),
+    div("",[lbl("سعر الشراء (د.ع)"),mkInp(f.buyPrice,v=>{S.form.buyPrice=v;_deferRender();},"0","number",{borderColor:"#f59e0b"})]),
+    div("",[lbl("سعر البيع (د.ع)"),mkInp(f.sellPrice,v=>{S.form.sellPrice=v;_deferRender();},"0","number",{borderColor:"#22c55e"})]),
     div("",[lbl("الكمية"),mkInp(f.quantity,v=>S.form.quantity=v,"0","number")]),
     div("span2",[profitEl]),
     div("span2",[lbl("صورة المنتج"),imgPrev,fileInp].filter(Boolean)),
@@ -1134,7 +1256,7 @@ function pgQuickSale(){
   const si=document.createElement("input");
   si.type="text";si.placeholder="🔍 ابحث عن منتج...";si.value=S.search||"";
   si.style.cssText="flex:1;min-width:120px;padding:10px 14px;border-radius:10px;border:1px solid var(--border);background:var(--in);color:var(--text);font-size:14px;font-family:inherit;outline:none;direction:rtl;";
-  si.oninput=e=>{S.search=e.target.value;renderApp();};
+  si.oninput=e=>{S.search=e.target.value;_deferRender();};
   const catSel=document.createElement("select");
   catSel.style.cssText="padding:10px;border-radius:10px;border:1px solid var(--border);background:var(--in);color:var(--text);font-size:13px;cursor:pointer;";
   CATS_F.forEach(cat=>{const o=document.createElement("option");o.value=cat;o.textContent=cat;if(cat===(S.fCat||"الكل"))o.selected=true;catSel.appendChild(o);});
@@ -1800,30 +1922,87 @@ function pgUsers(){
   let body=null;
   if(S.userTab==="add"){
     const roles=Object.entries(ROLES).filter(([k])=>k!=="admin").map(([k,v])=>({v:k,l:v.label}));
-    const permsForRole=ROLES[S.rRole]?.p||[];
-    body=card([
-      div("",["➕ إضافة موظف / محاسب"],{style:{fontWeight:"700",color:"var(--ac)",marginBottom:"12px"}}),
-      S.rErr?div("auth-err",[S.rErr]):null,
-      S.rOk?div("auth-ok",["✅ تم إضافة الموظف بنجاح!"]):null,
-      div("g2",[
-        div("",[lbl("الاسم الكامل *"),mkInp(S.rName,v=>{S.rName=v;},undefined,undefined,undefined,true)]),
-        div("",[lbl("رقم الهاتف *"),mkInp(S.rPhone,v=>{S.rPhone=v;},undefined,undefined,undefined,true)]),
-        div("",[lbl("الدور"),mkSel(S.rRole,roles,v=>{S.rRole=v;renderApp();})]),
-        div("",[lbl("الصلاحيات"),div("",["📋 "+permsForRole.join("، ")],{style:{fontSize:"11px",color:"var(--sub)",marginTop:"4px",lineHeight:"1.7"}})]),
-        div("",[lbl("كلمة المرور *"),mkInp(S.rPass,v=>{S.rPass=v;},"••••••","password")]),
-        div("",[lbl("تأكيد كلمة المرور *"),mkInp(S.rPass2,v=>{S.rPass2=v;},"••••••","password")]),
-        div("span2 flex",[makeBtn("➕ إضافة الموظف","btn-primary",()=>{
-          S.rErr="";S.rOk=false;
-          if(!S.rName.trim()||!S.rPhone.trim()||!S.rPass.trim()){S.rErr="أكمل جميع الحقول المطلوبة";renderApp();return;}
-          if(S.rPass!==S.rPass2){S.rErr="كلمة المرور غير متطابقة";renderApp();return;}
-          if(S.users.find(u=>u.phone===S.rPhone.trim())){S.rErr="رقم الهاتف مسجل مسبقاً";renderApp();return;}
-          const nu={id:String(Date.now()),name:S.rName.trim(),phone:S.rPhone.trim(),password:S.rPass,role:S.rRole,status:"approved",perms:ROLES[S.rRole]?.p||[]};
-          sUs(prev=>[...prev,nu]);
-          S.rName="";S.rPhone="";S.rPass="";S.rPass2="";S.rOk=true;
-          renderApp();
-        },{flex:"1",padding:"12px",fontWeight:"700"})]),
-      ].filter(Boolean)),
-    ]);
+    // Initialize custom perms for new employee if not set
+    if(!S.newEmpPerms)S.newEmpPerms=[...ROLES[S.rRole]?.p||[]];
+    // Build perms checkboxes
+    const addPermsWrap=document.createElement("div");
+    addPermsWrap.style.cssText="grid-column:span 2;";
+    const addPermsTitle=document.createElement("div");
+    addPermsTitle.style.cssText="font-weight:700;font-size:13px;margin-bottom:8px;color:var(--text);display:flex;align-items:center;gap:6px;";
+    addPermsTitle.innerHTML="🔐 الصلاحيات <span style='font-size:11px;font-weight:400;color:var(--sub);'>(يمكنك تخصيص الصلاحيات بشكل مستقل)</span>";
+    const addQuickRow=document.createElement("div");
+    addQuickRow.style.cssText="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;";
+    const addPermsGrid=document.createElement("div");
+    addPermsGrid.style.cssText="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:6px;background:var(--in);border-radius:12px;padding:12px;border:1px solid var(--border);";
+    const mkAQB=(label,keys,color)=>{
+      const b=document.createElement("button");
+      b.textContent=label;
+      b.style.cssText=`font-size:11px;padding:4px 10px;border-radius:6px;border:1px solid ${color||"var(--border)"};background:transparent;color:${color||"var(--sub)"};cursor:pointer;font-family:inherit;`;
+      b.onclick=()=>{
+        addPermsGrid.querySelectorAll("input[data-perm]").forEach(chk=>{
+          if(chk.disabled)return;
+          chk.checked=keys.includes(chk.dataset.perm);
+        });
+      };
+      return b;
+    };
+    addQuickRow.appendChild(mkAQB("موظف عادي",ROLES.staff.p,"#8b8fa8"));
+    addQuickRow.appendChild(mkAQB("محاسب",ROLES.accountant.p,"#22c55e"));
+    addQuickRow.appendChild(mkAQB("موظف مخزن",ROLES.warehouse.p,"#f59e0b"));
+    addQuickRow.appendChild(mkAQB("تحديد الكل",PAGES.map(p=>p.k),"#6366f1"));
+    addQuickRow.appendChild(mkAQB("إلغاء الكل",["dashboard"],"#ef4444"));
+    PAGES.forEach(pg=>{
+      const wrapper=document.createElement("label");
+      wrapper.style.cssText="display:flex;align-items:center;gap:8px;cursor:pointer;padding:7px 8px;border-radius:8px;transition:background .15s;font-size:13px;user-select:none;";
+      wrapper.onmouseenter=()=>{wrapper.style.background="rgba(99,102,241,.09)";}
+      wrapper.onmouseleave=()=>{wrapper.style.background="";}
+      const chk=document.createElement("input");
+      chk.type="checkbox";
+      chk.dataset.perm=pg.k;
+      chk.checked=(S.newEmpPerms||[]).includes(pg.k);
+      chk.style.cssText="width:16px;height:16px;accent-color:var(--ac);cursor:pointer;flex-shrink:0;";
+      if(pg.k==="dashboard"){chk.disabled=true;chk.checked=true;}
+      const lbSpan=document.createElement("span");
+      lbSpan.textContent=pg.l;
+      wrapper.appendChild(chk);
+      wrapper.appendChild(lbSpan);
+      addPermsGrid.appendChild(wrapper);
+    });
+    addPermsWrap.appendChild(addPermsTitle);
+    addPermsWrap.appendChild(addQuickRow);
+    addPermsWrap.appendChild(addPermsGrid);
+    const addG2=document.createElement("div");
+    addG2.className="g2";
+    if(S.rErr){const e=document.createElement("div");e.className="auth-err";e.style.cssText="grid-column:span 2;";e.textContent=S.rErr;addG2.appendChild(e);}
+    if(S.rOk){const ok=document.createElement("div");ok.className="auth-ok";ok.style.cssText="grid-column:span 2;";ok.textContent="✅ تم إضافة الموظف بنجاح!";addG2.appendChild(ok);}
+    const addC1=document.createElement("div");addC1.appendChild(lbl("الاسم الكامل *"));addC1.appendChild(mkInp(S.rName,v=>{S.rName=v;},undefined,undefined,undefined,true));
+    const addC2=document.createElement("div");addC2.appendChild(lbl("رقم الهاتف *"));addC2.appendChild(mkInp(S.rPhone,v=>{S.rPhone=v;},undefined,undefined,undefined,true));
+    const addC3=document.createElement("div");addC3.appendChild(lbl("الدور"));addC3.appendChild(mkSel(S.rRole,roles,v=>{S.rRole=v;S.newEmpPerms=[...ROLES[v]?.p||[]];renderApp();}));
+    const addC4=document.createElement("div");addC4.appendChild(lbl("كلمة المرور *"));addC4.appendChild(mkInp(S.rPass,v=>{S.rPass=v;},"••••••","password"));
+    const addC5=document.createElement("div");addC5.appendChild(lbl("تأكيد كلمة المرور *"));addC5.appendChild(mkInp(S.rPass2,v=>{S.rPass2=v;},"••••••","password"));
+    const addBtnWrap=document.createElement("div");
+    addBtnWrap.style.cssText="grid-column:span 2;";
+    const addBtn=makeBtn("➕ إضافة الموظف","btn-primary",()=>{
+      S.rErr="";S.rOk=false;
+      if(!S.rName.trim()||!S.rPhone.trim()||!S.rPass.trim()){S.rErr="أكمل جميع الحقول المطلوبة";renderApp();return;}
+      if(S.rPass!==S.rPass2){S.rErr="كلمة المرور غير متطابقة";renderApp();return;}
+      if(S.users.find(u=>u.phone===S.rPhone.trim())){S.rErr="رقم الهاتف مسجل مسبقاً";renderApp();return;}
+      // قراءة الصلاحيات من الـ DOM مباشرة
+      const selectedPerms=Array.from(addPermsGrid.querySelectorAll("input[data-perm]:checked"))
+        .map(chk=>chk.dataset.perm);
+      if(!selectedPerms.includes("dashboard"))selectedPerms.unshift("dashboard");
+      const nu={id:String(Date.now()),name:S.rName.trim(),phone:S.rPhone.trim(),password:S.rPass,role:S.rRole,status:"approved",perms:selectedPerms};
+      sUs(prev=>[...prev,nu]);
+      S.rName="";S.rPhone="";S.rPass="";S.rPass2="";S.newEmpPerms=null;S.rOk=true;
+      renderApp();
+    });
+    addBtn.style.cssText="width:100%;padding:12px;font-weight:700;";
+    addBtnWrap.appendChild(addBtn);
+    [addC1,addC2,addC3,addC4,addC5,addPermsWrap,addBtnWrap].forEach(el=>addG2.appendChild(el));
+    const addTitleDiv=document.createElement("div");
+    addTitleDiv.style.cssText="font-weight:700;color:var(--ac);margin-bottom:12px;";
+    addTitleDiv.textContent="➕ إضافة موظف / محاسب";
+    body=card([addTitleDiv,addG2]);
   } else if(S.userTab==="currency"){
     body=card([
       div("",["💱 العملة"],{style:{fontWeight:"700",color:"var(--ac)",marginBottom:"14px"}}),
@@ -1854,24 +2033,98 @@ function pgUsers(){
   if(S.userTab==="editUser"&&S.editUser){
     const eu=S.editUser;
     const roles=Object.entries(ROLES).filter(([k])=>k!=="admin").map(([k,v])=>({v:k,l:v.label}));
-    body=card([
-      div("",["✏️ تعديل: "+eu.name],{style:{fontWeight:"700",color:"var(--ac)",marginBottom:"12px"}}),
-      div("g2",[
-        div("",[lbl("الاسم"),mkInp(eu.name,v=>{S.editUser.name=v;},undefined,undefined,undefined,true)]),
-        div("",[lbl("الهاتف"),mkInp(eu.phone,v=>{S.editUser.phone=v;},undefined,undefined,undefined,true)]),
-        div("",[lbl("الدور"),mkSel(eu.role,roles,v=>{S.editUser.role=v;S.editUser.perms=ROLES[v]?.p||[];renderApp();})]),
-        div("",[lbl("كلمة المرور الجديدة (اتركها فارغة للإبقاء)"),mkInp(S.rPass||"",v=>{S.rPass=v;},"••••••","password")]),
-        div("span2 flex",[
-          makeBtn("💾 حفظ","btn-primary",()=>{
-            const upd={...eu,perms:ROLES[eu.role]?.p||[]};
-            if(S.rPass&&S.rPass.trim())upd.password=S.rPass;
-            sUs(prev=>prev.map(x=>x.id===upd.id?upd:x));
-            S.rPass="";S.userTab="list";S.editUser=null;renderApp();
-          },{flex:"1",padding:"12px",fontWeight:"700"}),
-          makeBtn("إلغاء","",()=>{S.userTab="list";S.editUser=null;S.rPass="";renderApp();},{flex:"1",padding:"12px",color:"var(--sub)"}),
-        ]),
-      ]),
-    ]);
+    // Build permissions checkboxes section
+    const permsWrap=document.createElement("div");
+    permsWrap.style.cssText="grid-column:span 2;";
+    const permsTitle=document.createElement("div");
+    permsTitle.style.cssText="font-weight:700;font-size:13px;margin-bottom:8px;color:var(--text);display:flex;align-items:center;gap:6px;";
+    permsTitle.innerHTML="🔐 الصلاحيات المخصصة <span style='font-size:11px;font-weight:400;color:var(--sub);'>(يمكنك تفعيل أو إلغاء أي صلاحية بشكل مستقل)</span>";
+    // Quick preset buttons — تعدّل الـ checkboxes مباشرة بدون renderApp
+    const quickRow=document.createElement("div");
+    quickRow.style.cssText="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;";
+    const mkQB=(label,keys,color)=>{
+      const b=document.createElement("button");
+      b.textContent=label;
+      b.style.cssText=`font-size:11px;padding:4px 10px;border-radius:6px;border:1px solid ${color||"var(--border)"};background:transparent;color:${color||"var(--sub)"};cursor:pointer;font-family:inherit;transition:background .15s;`;
+      b.onmouseenter=()=>{b.style.background=color?(color+"22"):"var(--in)";}
+      b.onmouseleave=()=>{b.style.background="transparent";}
+      b.onclick=()=>{
+        // تحديث الـ checkboxes في الـ DOM مباشرة بدون إعادة رسم
+        permsGrid.querySelectorAll("input[data-perm]").forEach(chk=>{
+          if(chk.disabled)return;
+          chk.checked=keys.includes(chk.dataset.perm);
+        });
+      };
+      return b;
+    };
+    quickRow.appendChild(mkQB("موظف عادي",ROLES.staff.p,"#8b8fa8"));
+    quickRow.appendChild(mkQB("محاسب",ROLES.accountant.p,"#22c55e"));
+    quickRow.appendChild(mkQB("موظف مخزن",ROLES.warehouse.p,"#f59e0b"));
+    quickRow.appendChild(mkQB("تحديد الكل",PAGES.map(p=>p.k),"#6366f1"));
+    quickRow.appendChild(mkQB("إلغاء الكل",["dashboard"],"#ef4444"));
+    const permsGrid=document.createElement("div");
+    permsGrid.style.cssText="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:6px;background:var(--in);border-radius:12px;padding:12px;border:1px solid var(--border);";
+    PAGES.forEach(pg=>{
+      const wrapper=document.createElement("label");
+      wrapper.style.cssText="display:flex;align-items:center;gap:8px;cursor:pointer;padding:7px 8px;border-radius:8px;transition:background .15s;font-size:13px;user-select:none;";
+      wrapper.onmouseenter=()=>{wrapper.style.background="rgba(99,102,241,.09)";}
+      wrapper.onmouseleave=()=>{wrapper.style.background="";}
+      const chk=document.createElement("input");
+      chk.type="checkbox";
+      chk.dataset.perm=pg.k;
+      chk.checked=(S.editUser.perms||[]).includes(pg.k);
+      chk.style.cssText="width:16px;height:16px;accent-color:var(--ac);cursor:pointer;flex-shrink:0;";
+      if(pg.k==="dashboard"){chk.disabled=true;chk.checked=true;wrapper.title="الرئيسية مفعّلة دائماً";}
+      const lbSpan=document.createElement("span");
+      lbSpan.textContent=pg.l;
+      wrapper.appendChild(chk);
+      wrapper.appendChild(lbSpan);
+      permsGrid.appendChild(wrapper);
+    });
+    permsWrap.appendChild(permsTitle);
+    permsWrap.appendChild(quickRow);
+    permsWrap.appendChild(permsGrid);
+    // Build grid manually (can't use div() helper for mixed DOM/vdom)
+    const g2=document.createElement("div");
+    g2.className="g2";
+    const mkCell=(content)=>{const d=document.createElement("div");if(content instanceof Node)d.appendChild(content);else d.innerHTML=content;return d;};
+    // Row 1
+    const c1=document.createElement("div");
+    c1.appendChild(lbl("الاسم"));
+    c1.appendChild(mkInp(eu.name,v=>{S.editUser.name=v;},undefined,undefined,undefined,true));
+    const c2=document.createElement("div");
+    c2.appendChild(lbl("الهاتف"));
+    c2.appendChild(mkInp(eu.phone,v=>{S.editUser.phone=v;},undefined,undefined,undefined,true));
+    const c3=document.createElement("div");
+    c3.appendChild(lbl("الدور"));
+    c3.appendChild(mkSel(eu.role,roles,v=>{S.editUser.role=v;S.editUser.perms=ROLES[v]?.p||[];renderApp();}));
+    const c4=document.createElement("div");
+    c4.appendChild(lbl("كلمة المرور الجديدة (اتركها فارغة للإبقاء)"));
+    c4.appendChild(mkInp(S.rPass||"",v=>{S.rPass=v;},"••••••","password"));
+    // Buttons row
+    const cBtns=document.createElement("div");
+    cBtns.style.cssText="grid-column:span 2;display:flex;gap:10px;";
+    const saveB=makeBtn("💾 حفظ","btn-primary",()=>{
+      // نقرأ الصلاحيات من الـ checkboxes مباشرة — هذا يضمن أخذ آخر حالة فعلية
+      const checkedPerms=Array.from(permsGrid.querySelectorAll("input[data-perm]:checked"))
+        .map(chk=>chk.dataset.perm);
+      // dashboard دائماً موجود
+      if(!checkedPerms.includes("dashboard"))checkedPerms.unshift("dashboard");
+      const upd={...eu, name:S.editUser.name, phone:S.editUser.phone, role:S.editUser.role, perms:checkedPerms};
+      if(S.rPass&&S.rPass.trim())upd.password=S.rPass;
+      sUs(prev=>prev.map(x=>x.id===upd.id?upd:x));
+      S.rPass="";S.userTab="list";S.editUser=null;renderApp();
+    });
+    saveB.style.cssText="flex:1;padding:12px;font-weight:700;";
+    const cancelB=makeBtn("إلغاء","",()=>{S.userTab="list";S.editUser=null;S.rPass="";renderApp();});
+    cancelB.style.cssText="flex:1;padding:12px;color:var(--sub);";
+    cBtns.appendChild(saveB);
+    cBtns.appendChild(cancelB);
+    [c1,c2,c3,c4,permsWrap,cBtns].forEach(el=>g2.appendChild(el));
+    const titleDiv=document.createElement("div");
+    titleDiv.style.cssText="font-weight:700;color:var(--ac);margin-bottom:12px;";
+    titleDiv.textContent="✏️ تعديل: "+eu.name;
+    body=card([titleDiv,g2]);
   }
   return div("",[tabs,body].filter(Boolean));
 }
@@ -1937,6 +2190,10 @@ function pgBackup(){
 // APP RENDER
 // ═══════════════════════════════════════════════════════════
 function renderApp(){
+  // حفظ الـ focus قبل إعادة الرسم لمنع ضياع موضع الكتابة
+  const focusedEl=document.activeElement;
+  const focusId=focusedEl?.dataset?.fid||null;
+
   const app=document.getElementById("app");app.innerHTML="";
   const MENU=PAGES.filter(p=>can(p.k));
   const pending=S.users.filter(u=>u.status==="pending");
@@ -2019,6 +2276,18 @@ function renderApp(){
       div("flex",[makeBtn("🖨️ طباعة الفاتورة","btn-primary",()=>{printW(invoiceHTML(inv));S.printInv=null;renderApp();},{flex:"1",padding:"11px",fontWeight:"700"}),makeBtn("➕ بيع جديد","btn-green",()=>{S.printInv=null;renderApp();},{flex:"1",padding:"11px",fontWeight:"700"}),makeBtn("تخطي","",()=>{S.printInv=null;renderApp();},{flex:"1",padding:"11px",color:"var(--sub)"})]),
     ],{maxWidth:"380px"})]);
     app.appendChild(modal);
+  }
+
+  // استعادة الـ focus بعد إعادة الرسم — الـ cursor يذهب لنهاية النص دائماً
+  if(focusId){
+    const el=app.querySelector(`[data-fid="${focusId}"]`);
+    if(el){
+      el.focus();
+      if(el.setSelectionRange){
+        const len=el.value?.length||0;
+        try{el.setSelectionRange(len,len);}catch{}
+      }
+    }
   }
 }
 
@@ -2380,12 +2649,18 @@ function saWipeAll(){
 // INIT
 // ═══════════════════════════════════════════════════════════
 async function initPortal(){
-  await loadPortalData();
-  document.getElementById("cloud-loading")?.remove();
-  _portalReady=true;
-  updateStats();
-  renderStores();
-  renderAuthCard();
+  try{
+    await loadPortalData();
+  }catch(e){
+    console.warn("فشل تهيئة البوابة:",e);
+    if(!isValidPD(PD))PD={stores:[],pendingStores:[]};
+  }finally{
+    document.getElementById("cloud-loading")?.remove();
+    _portalReady=true;
+    updateStats();
+    renderStores();
+    renderAuthCard();
+  }
 }
 
 if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",initPortal);}
