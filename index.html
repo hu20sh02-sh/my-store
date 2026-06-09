@@ -2660,7 +2660,54 @@ async function initPortal(){
     updateStats();
     renderStores();
     renderAuthCard();
+    startCloudSync(); // بدء المزامنة التلقائية بين الأجهزة
   }
+}
+
+// ── مزامنة تلقائية بين الأجهزة ─────────────────────────────
+// يسأل السحابة كل 30 ثانية — لو تغيرت البيانات يحدّث الواجهة فوراً
+const SYNC_INTERVAL=30000; // 30 ثانية
+let _syncTimer=null;
+let _lastSyncHash="";
+
+function pdHash(d){
+  // بصمة مختصرة للبيانات — للكشف عن التغيير بدون مقارنة كاملة
+  try{return String((d?.stores?.length||0))+"|"+(d?.pendingStores?.length||0)+"|"+(d?.stores?.map(s=>s.id+s.name+(s.productsCount||0)+(s.salesCount||0)).join(","));}
+  catch{return "";}
+}
+
+async function cloudSyncTick(){
+  if(!CLOUD_ON)return; // لا معنى للـ polling بدون سحابة
+  if(_cloudSaving)return; // لا تتعارض مع حفظ جارٍ
+  try{
+    const r=await fetchTimeout(CLOUD_WORKER_URL+"?action=load",{},6000);
+    if(!r.ok)return;
+    const d=await r.json();
+    if(!isValidPD(d))return;
+    const newHash=pdHash(d);
+    if(newHash===_lastSyncHash)return; // لا يوجد تغيير — لا تفعل شيئاً
+    _lastSyncHash=newHash;
+    PD=d;
+    if(!PD.pendingStores)PD.pendingStores=[];
+    localStorage.setItem(PORTAL_KEY,JSON.stringify(PD));
+    // تحديث الواجهة فقط لو المستخدم في الصفحة الرئيسية (مو داخل متجر)
+    if(!CURRENT_STORE){
+      updateStats();
+      renderStores();
+      // لو السوبر أدمن پانل مفتوح — حدّثه أيضاً
+      if(document.getElementById("sa-panel"))renderSAPanel();
+    }
+  }catch{} // أخطاء الشبكة صامتة — لا تزعج المستخدم
+}
+
+function startCloudSync(){
+  if(!CLOUD_ON)return;
+  _lastSyncHash=pdHash(PD); // نقطة البداية
+  _syncTimer=setInterval(cloudSyncTick,SYNC_INTERVAL);
+  // مزامنة فورية عند رجوع المستخدم للتبويب
+  document.addEventListener("visibilitychange",()=>{
+    if(document.visibilityState==="visible")cloudSyncTick();
+  });
 }
 
 if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",initPortal);}
