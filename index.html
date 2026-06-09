@@ -747,9 +747,10 @@ async function createStore(){
   if(!PS.cPhone.trim()){PS.cErr="أدخل رقم الهاتف";renderAuthCard();return;}
   if(!PS.cPass.trim()){PS.cErr="أدخل كلمة المرور";renderAuthCard();return;}
   if(PS.cPass!==PS.cPass2){PS.cErr="كلمة المرور غير متطابقة";renderAuthCard();return;}
-  // Check phone uniqueness in both approved stores AND pending requests
-  const allPhones=[...PD.stores.map(s=>s.adminPhone),...(PD.pendingStores||[]).map(s=>s.adminPhone)];
-  if(allPhones.includes(PS.cPhone.trim())){PS.cErr="رقم الهاتف لديه متجر نشط أو طلب معلق بالفعل";renderAuthCard();return;}
+
+  // جلب أحدث نسخة من السحابة قبل الإضافة — يمنع الكتابة على طلبات الآخرين
+  await loadPortalData();
+
   const defaultCats=getCatsByType(PS.cCat);
   const req={
     id:"store_"+Date.now(),
@@ -772,7 +773,6 @@ async function createStore(){
   if(!PD.pendingStores)PD.pendingStores=[];
   PD.pendingStores.push(req);
   await savePortalData(PD);
-  // Show success message
   PS.cErr="";PS.cName="";PS.cOwner="";PS.cPhone="";PS.cPass="";PS.cPass2="";
   PS.cOk="✅ تم إرسال طلب الانضمام! انتظر موافقة الإدارة ثم سجّل الدخول.";
   renderAuthCard();
