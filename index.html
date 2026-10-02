@@ -472,8 +472,7 @@ async function loadPortalData(){
       if(!r.ok)throw new Error("cloud "+r.status);
       const d=await r.json();
       if(isValidPD(d)){
-        PD=d;
-        if(!PD.pendingStores)PD.pendingStores=[];
+        PD=normPD(d);
         backupLocal();
         localStorage.setItem(PORTAL_KEY,JSON.stringify(PD)); // تخزين محلي كنسخة مؤقتة
         window.CLOUD_STATUS="cloud";
@@ -490,39 +489,115 @@ async function loadPortalData(){
     const v=localStorage.getItem(PORTAL_KEY);
     if(v){
       const d=JSON.parse(v);
-      if(isValidPD(d)){PD=d;if(!PD.pendingStores)PD.pendingStores=[];return false;}
+      if(isValidPD(d)){PD=normPD(d);return false;}
     }
   }catch{}
   // 3) لا توجد بيانات — ابدأ فارغاً
-  PD={stores:[],pendingStores:[]};
+  PD={stores:[],pendingStores:[],users:{}};
   return false;
 }
 
-async function savePortalData(d){
-  // تحقق من السلامة قبل أي حفظ
-  if(!isValidPD(d)){console.warn("رفض حفظ بيانات غير صالحة");return;}
-  PD=d;
-  if(!PD.pendingStores)PD.pendingStores=[];
-  // الحفظ المحلي دائماً أولاً (مضمون حتى بدون إنترنت)
-  backupLocal();
-  try{localStorage.setItem(PORTAL_KEY,JSON.stringify(PD));}catch{}
-  // ثم المزامنة السحابية إن كانت مفعّلة
-  if(!CLOUD_ON)return;
-  if(_cloudSaving){_saveQueued=true;return;} // تفادي تداخل عمليات الحفظ
-  _cloudSaving=true;
+// ══════════════════════════════════════════════════════════════════════════════
+// الحفظ الآمن (الإصلاح الجذري)
+// ──────────────────────────────────────────────────────────────────────────────
+// المشكلة القديمة: كل جهاز كان يرفع نسخته الكاملة (القديمة) من البيانات فوق السحابة
+// عند كل عملية بيع/إضافة مادة/تعديل — فيمسح طلبات الانضمام التي وصلت بعد آخر تحميل.
+// الحل: كل تعديل = (اسحب أحدث نسخة من السحابة ← طبّق التعديل المحدد فقط ← ارفع ← تحقق).
+// ولا يُرفع أبداً شيء من نسخة محلية قديمة.
+function normPD(d){
+  if(!Array.isArray(d.pendingStores))d.pendingStores=[];
+  if(!d.users||typeof d.users!=="object"||Array.isArray(d.users))d.users={};
+  return d;
+}
+async function cloudFetch(ms){
+  const r=await fetchTimeout(CLOUD_WORKER_URL+"?action=load&t="+Date.now(),{cache:"no-store"},ms);
+  if(!r.ok)throw new Error("cloud "+r.status);
+  const d=await r.json();
+  if(!isValidPD(d))throw new Error("invalid cloud payload");
+  return normPD(d);
+}
+function saveLocalPD(){backupLocal();try{localStorage.setItem(PORTAL_KEY,JSON.stringify(PD));}catch{}}
+let _cloudQueue=Promise.resolve();
+// mutator: دالة تعدّل نسخة البيانات المعطاة (يجب أن تكون آمنة للتكرار)
+// verify: دالة اختيارية تتأكد أن التعديل موجود فعلاً في السحابة بعد الرفع
+function updatePD(mutator,verify){
+  const job=_cloudQueue.then(async()=>{
+    if(!CLOUD_ON){normPD(PD);mutator(PD);saveLocalPD();return true;}
+    _cloudSaving=true;
+    try{
+      for(let attempt=1;attempt<=3;attempt++){
+        try{
+          const fresh=await cloudFetch();
+          mutator(fresh);
+          const r=await fetchTimeout(CLOUD_WORKER_URL+"?action=save",{
+            method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(fresh),
+          });
+          if(!r.ok)throw new Error("save "+r.status);
+          if(verify){const chk=await cloudFetch();if(!verify(chk))throw new Error("verify failed");PD=chk;}
+          else PD=fresh;
+          saveLocalPD();
+          _lastSyncHash=pdHash(PD);
+          window.CLOUD_STATUS="cloud";
+          return true;
+        }catch(e){
+          console.warn("محاولة حفظ "+attempt+" فشلت:",e.message||e);
+          await new Promise(res=>setTimeout(res,800*attempt));
+        }
+      }
+      // فشل نهائي: نطبّق التعديل محلياً للعرض فقط — بدون رفع نسخة قديمة للسحابة
+      window.CLOUD_STATUS="error";
+      normPD(PD);mutator(PD);saveLocalPD();
+      return false;
+    }finally{_cloudSaving=false;}
+  });
+  _cloudQueue=job.catch(()=>false);
+  return job;
+}
+
+// ── صندوق الإرسال: أي طلب انضمام لم يتأكد وصوله يُعاد إرساله تلقائياً ──
+const OUTBOX_KEY="matajer_outbox_v1";
+function obGet(){try{return JSON.parse(localStorage.getItem(OUTBOX_KEY)||"[]");}catch{return [];}}
+function obSet(a){try{localStorage.setItem(OUTBOX_KEY,JSON.stringify(a));}catch{}}
+function obAdd(item){const a=obGet().filter(x=>x.id!==item.id);a.push(item);obSet(a);}
+function obRemove(id){obSet(obGet().filter(x=>x.id!==id));}
+function storeReqMutator(req){
+  return d=>{if(!d.pendingStores.some(x=>x.id===req.id)&&!d.stores.some(x=>x.id===req.id))d.pendingStores.push(req);};
+}
+function storeReqArrived(req){return d=>d.pendingStores.some(x=>x.id===req.id)||d.stores.some(x=>x.id===req.id);}
+function empReqMutator(item){
+  return d=>{
+    const store=d.stores.find(s=>s.id===item.storeId);if(!store)return;
+    const list=d.users[item.storeId]||[storeAdminUser(store)];
+    if(!list.some(u=>u.id===item.user.id||u.phone===item.user.phone))list.push(item.user);
+    d.users[item.storeId]=list;
+  };
+}
+function empReqArrived(item){return d=>(d.users[item.storeId]||[]).some(u=>u.id===item.user.id);}
+let _flushing=false;
+async function flushOutbox(){
+  if(!CLOUD_ON||_flushing)return;
+  const items=obGet();if(!items.length)return;
+  _flushing=true;
   try{
-    const r=await fetchTimeout(CLOUD_WORKER_URL+"?action=save",{
-      method:"POST",
-      headers:{"Content-Type":"application/json"},
-      body:JSON.stringify(PD),
-    });
-    window.CLOUD_STATUS=r.ok?"cloud":"error";
-  }catch(e){
-    console.warn("تعذّر الحفظ في السحابة (حُفظ محلياً):",e.message||e);
-    window.CLOUD_STATUS="error";
-  }
-  _cloudSaving=false;
-  if(_saveQueued){_saveQueued=false;savePortalData(PD);} // نفّذ آخر حفظ مؤجّل
+    for(const it of items){
+      const ok=it.type==="emp"
+        ?await updatePD(empReqMutator(it),empReqArrived(it))
+        :await updatePD(storeReqMutator(it.req),storeReqArrived(it.req));
+      if(ok)obRemove(it.id);
+    }
+  }finally{_flushing=false;}
+}
+
+// ── مستخدمو كل متجر صاروا في السحابة (حتى يوصل طلب الموظف للمدير من أي جهاز) ──
+function storeAdminUser(store){
+  return {id:"1",name:store.ownerName,phone:store.adminPhone,password:store.adminPass,role:"admin",status:"approved",perms:ADMIN_PERMS};
+}
+function getStoreUsers(store){
+  const DA=storeAdminUser(store);
+  let list=(PD.users&&PD.users[store.id])||ls("vs_users_"+store.id,null)||[DA];
+  list=list.map(u=>u.id==="1"&&u.role==="admin"?{...u,phone:store.adminPhone,password:store.adminPass}:u);
+  if(!list.some(u=>u.role==="admin"))list=[DA,...list];
+  return list;
 }
 
 function getPortalData(){return PD;}// kept for compat
@@ -569,6 +644,7 @@ function updateStats(){
 // Stores directory
 function renderStores(list){
   const grid=document.getElementById("storesGrid");
+  if(!grid)return; // قسم المتاجر غير موجود بالصفحة — كان يسبب خطأ يوقف المزامنة التلقائية
   if(!list){list=PD.stores;}
   if(list.length===0){grid.innerHTML='<p style="color:var(--sub);grid-column:1/-1;text-align:center;padding:2rem;">لا توجد متاجر بعد.</p>';return;}
   grid.innerHTML=list.map(s=>{
@@ -748,9 +824,7 @@ async function createStore(){
   if(!PS.cPass.trim()){PS.cErr="أدخل كلمة المرور";renderAuthCard();return;}
   if(PS.cPass!==PS.cPass2){PS.cErr="كلمة المرور غير متطابقة";renderAuthCard();return;}
 
-  // جلب أحدث نسخة من السحابة قبل الإضافة — يمنع الكتابة على طلبات الآخرين
-  await loadPortalData();
-
+  if(PS._sending)return;
   const defaultCats=getCatsByType(PS.cCat);
   const req={
     id:"store_"+Date.now(),
@@ -770,11 +844,16 @@ async function createStore(){
     apiUrl:PS.cAPI?.trim()||"",
     status:"pending",
   };
-  if(!PD.pendingStores)PD.pendingStores=[];
-  PD.pendingStores.push(req);
-  await savePortalData(PD);
+  // يُحفظ في صندوق الإرسال أولاً — لا يضيع الطلب حتى لو انقطع النت
+  obAdd({id:req.id,type:"store",req});
+  PS._sending=true;PS.cOk="⏳ جاري إرسال الطلب...";renderAuthCard();
+  const ok=await updatePD(storeReqMutator(req),storeReqArrived(req));
+  PS._sending=false;
+  if(ok)obRemove(req.id);
   PS.cErr="";PS.cName="";PS.cOwner="";PS.cPhone="";PS.cPass="";PS.cPass2="";
-  PS.cOk="✅ تم إرسال طلب الانضمام! انتظر موافقة الإدارة ثم سجّل الدخول.";
+  PS.cOk=ok
+    ?"✅ تم إرسال طلب الانضمام ووصل للإدارة! انتظر الموافقة ثم سجّل الدخول."
+    :"⚠️ ضعف في الإنترنت — الطلب محفوظ على جهازك وسيُرسل تلقائياً. لا تغلق الصفحة وأعد فتحها لاحقاً.";
   renderAuthCard();
   updateStats();
   renderStores();
@@ -866,32 +945,42 @@ function renderRegisterForm(c){
     });
   }
 }
-function doRegisterEmployee(){
+async function doRegisterEmployee(){
   PS.regErr="";PS.regOk=false;
+  if(PS._sending)return;
+  if(CLOUD_ON){try{PD=await cloudFetch(5000);saveLocalPD();}catch{}}
   PS.regStoreId=(PD.stores.find(s=>s.name.trim()===(PS.regStoreName||"").trim())||{}).id||"";
   if(!PS.regStoreId){PS.regErr="اسم المتجر غير موجود — تأكد من الكتابة";renderAuthCard();return;}
   if(!PS.regName.trim()||!PS.regPhone.trim()||!PS.regPass.trim()){PS.regErr="أكمل جميع الحقول";renderAuthCard();return;}
   if(PS.regPass!==PS.regPass2){PS.regErr="كلمة المرور غير متطابقة";renderAuthCard();return;}
-  const storeKey="vs_users_"+PS.regStoreId;
   const store=PD.stores.find(s=>s.id===PS.regStoreId);
   if(!store){PS.regErr="المتجر غير موجود";renderAuthCard();return;}
-  const DA={id:"1",name:store.ownerName,phone:store.adminPhone,password:store.adminPass,role:"admin",status:"approved",perms:ADMIN_PERMS};
-  const users=ls(storeKey,[DA]);
+  const users=getStoreUsers(store);
   if(users.find(u=>u.phone===PS.regPhone.trim())){PS.regErr="رقم الهاتف مسجل مسبقاً في هذا المتجر";renderAuthCard();return;}
   const nu={id:String(Date.now()),name:PS.regName.trim(),phone:PS.regPhone.trim(),password:PS.regPass,role:PS.regRole,status:"pending",perms:ROLES[PS.regRole]?.p||[]};
-  ss(storeKey,[...users,nu]);
-  PS.regName="";PS.regPhone="";PS.regPass="";PS.regPass2="";PS.regOk=true;
+  // الطلب يروح للسحابة (مو بس جهاز الموظف) حتى يشوفه المدير من جهازه
+  const item={id:"emp_"+nu.id,type:"emp",storeId:store.id,user:nu};
+  obAdd(item);
+  PS._sending=true;
+  const ok=await updatePD(empReqMutator(item),empReqArrived(item));
+  PS._sending=false;
+  if(ok)obRemove(item.id);
+  PS.regName="";PS.regPhone="";PS.regPass="";PS.regPass2="";
+  if(ok)PS.regOk=true;
+  else PS.regErr="⚠️ ضعف في الإنترنت — الطلب محفوظ وسيُرسل تلقائياً عند تحسن الاتصال.";
   renderAuthCard();
 }
-function doLogin(){
+async function doLogin(){
   PS.lErr="";
   if(!(PS.lStoreName||"").trim()){PS.lErr="أدخل اسم المتجر";renderAuthCard();return;}
   if(!PS.lPhone.trim()||!PS.lPass.trim()){PS.lErr="أكمل بيانات الدخول";renderAuthCard();return;}
+  // أحدث نسخة قبل التحقق — حتى الموافقة الجديدة تنعكس فوراً
+  if(CLOUD_ON){try{PD=await cloudFetch(5000);saveLocalPD();}catch{}}
   const store=PD.stores.find(s=>s.name.trim()===PS.lStoreName.trim());
   if(!store){PS.lErr="اسم المتجر غير موجود — تأكد من الكتابة الصحيحة";renderAuthCard();return;}
   if(store.banned){PS.lErr="🚫 هذا المتجر محظور. تواصل مع الإدارة.";renderAuthCard();return;}
   // Check all users in store's local storage
-  const storeUsers=ls("vs_users_"+store.id,[{id:"1",name:store.ownerName,phone:store.adminPhone,password:store.adminPass,role:"admin",status:"approved",perms:ADMIN_PERMS}]);
+  const storeUsers=getStoreUsers(store);
   const user=storeUsers.find(u=>u.phone===PS.lPhone.trim()&&u.password===PS.lPass&&u.status==="approved");
   if(!user){PS.lErr="بيانات الدخول غير صحيحة أو الحساب لا يزال قيد المراجعة";renderAuthCard();return;}
   openStoreApp(store,user);
@@ -937,10 +1026,13 @@ async function apiPost(b){if(!CURRENT_STORE?.apiUrl)return{ok:false};try{const r
 function openStoreApp(store,user){
   if(store.banned){alert("🚫 هذا المتجر محظور ولا يمكن فتحه.");return;}
   CURRENT_STORE=store;
-  const DA={id:"1",name:store.ownerName,phone:store.adminPhone,password:store.adminPass,role:"admin",status:"approved",perms:ADMIN_PERMS};
-  // Ensure admin is in users list
-  let existingUsers=ls(lsk("users"),[DA]);
-  if(!existingUsers.find(u=>u.role==="admin")){existingUsers=[DA,...existingUsers];}
+  // المستخدمون من السحابة (مع ترحيل القائمة المحلية القديمة أول مرة)
+  let existingUsers=getStoreUsers(store);
+  ss(lsk("users"),existingUsers);
+  if(CLOUD_ON&&!(PD.users&&PD.users[store.id])&&user.role==="admin"){
+    const migrate=existingUsers;
+    updatePD(d=>{if(!d.users[store.id])d.users[store.id]=migrate;});
+  }
   S={
     user,screen:"main",
     page:"dashboard",sideOpen:false,saving:"",
@@ -991,7 +1083,33 @@ function sSu(v){S.suppliers=typeof v==="function"?v(S.suppliers):v;ss(lsk("supp"
 function sEx(v){S.expenses=typeof v==="function"?v(S.expenses):v;ss(lsk("exp"),S.expenses);}
 function sRt(v){S.returns=typeof v==="function"?v(S.returns):v;ss(lsk("ret"),S.returns);}
 function sPo(v){S.pos=typeof v==="function"?v(S.pos):v;ss(lsk("po"),S.pos);}
-function sUs(v){S.users=typeof v==="function"?v(S.users):v;ss(lsk("users"),S.users);}
+function sUs(v){
+  const oldIds=new Set((S.users||[]).map(u=>u.id));
+  S.users=typeof v==="function"?v(S.users):v;
+  ss(lsk("users"),S.users);
+  const sid=CURRENT_STORE?.id;if(!sid)return;
+  const mine=S.users;
+  // نرفع تعديل المدير مع الحفاظ على أي طلب جديد وصل للسحابة بنفس اللحظة
+  updatePD(d=>{
+    const cloud=d.users[sid]||[];
+    const arrived=cloud.filter(u=>!oldIds.has(u.id)&&!mine.some(m=>m.id===u.id));
+    d.users[sid]=[...mine,...arrived];
+  }).then(()=>{
+    if(CURRENT_STORE?.id===sid&&PD.users[sid]){S.users=PD.users[sid];ss(lsk("users"),S.users);}
+  });
+}
+// تحديث قائمة المستخدمين داخل المتجر من السحابة (طلبات الانضمام تظهر مباشرة)
+function refreshStoreUsersFromPD(){
+  if(!CURRENT_STORE||!PD.users||!PD.users[CURRENT_STORE.id])return;
+  const fresh=getStoreUsers(CURRENT_STORE);
+  const key=u=>u.map(x=>x.id+x.status+x.role+(x.perms||[]).join()).join("|");
+  if(key(fresh)===key(S.users||[]))return;
+  S.users=fresh;ss(lsk("users"),fresh);
+  const me=fresh.find(u=>u.id===S.user?.id);
+  if(me)S.user=me;
+  const ae=document.activeElement;
+  if(!(ae&&(ae.tagName==="INPUT"||ae.tagName==="TEXTAREA")))renderApp();
+}
 function sNo(v){S.notes=v;ss(lsk("note"),v);}
 function sIP(v){S.invPeriods=typeof v==="function"?v(S.invPeriods):v;ss(lsk("inv_periods"),S.invPeriods);}
 function set(k,v){S[k]=v;renderApp();}
@@ -1070,7 +1188,7 @@ async function sync(){
   up({saving:""});
   // Update store stats in portal
   const idx=PD.stores.findIndex(x=>x.id===CURRENT_STORE.id);
-  if(idx>=0){PD.stores[idx].productsCount=S.products.length;PD.stores[idx].salesCount=S.sales.length;savePortalData(PD);}
+  {const sid=CURRENT_STORE.id,pc=S.products.length,sc=S.sales.length;updatePD(d=>{const s=d.stores.find(x=>x.id===sid);if(s){s.productsCount=pc;s.salesCount=sc;}});}
 }
 
 async function addProduct(){
@@ -1084,7 +1202,7 @@ async function addProduct(){
   sP(prev=>[p,...prev]);
   // Update portal stats
   const idx=PD.stores.findIndex(x=>x.id===CURRENT_STORE?.id);
-  if(idx>=0){PD.stores[idx].productsCount=S.products.length+1;savePortalData(PD);}
+  if(idx>=0){const sid=CURRENT_STORE.id,pc=S.products.length+1;updatePD(d=>{const s=d.stores.find(x=>x.id===sid);if(s)s.productsCount=pc;});}
   up({form:{name:"",category:(CURRENT_STORE?.cats||["عام"])[0],buyPrice:"",sellPrice:"",quantity:"",sku:"",image:""},fErr:"",saving:"",page:"quickSale",search:"",fCat:"الكل",_newProductId:p.id});
 }
 async function saveEdit(id){
@@ -1119,7 +1237,7 @@ async function confirmSale(){
   if(c.payType==="debt")sDe(prev=>[{id:Date.now()+1,customerName:c.name,phone:c.phone||"",amount:sale.total,note:"بيع: "+pr.name,date:today(),status:"unpaid"},...prev]);
   // Update sales count in portal
   const idx=PD.stores.findIndex(x=>x.id===CURRENT_STORE?.id);
-  if(idx>=0){PD.stores[idx].salesCount=S.sales.length+1;savePortalData(PD);}
+  if(idx>=0){const sid=CURRENT_STORE.id,sc=S.sales.length+1;updatePD(d=>{const s=d.stores.find(x=>x.id===sid);if(s)s.salesCount=sc;});}
   up({saleM:null,sQty:1,cust:{name:"",phone:"",note:"",payType:"cash"},cErr:"",printInv:sale,saving:""});
 }
 
@@ -1374,7 +1492,7 @@ function pgQuickSale(){
       sP(prev=>prev.map(x=>String(x.id)===String(pr.id)?{...x,quantity:Math.max(0,x.quantity-qty)}:x));
       sSa(prev=>[sale,...prev]);
       const pidx=PD.stores.findIndex(x=>x.id===CURRENT_STORE?.id);
-      if(pidx>=0){PD.stores[pidx].salesCount=(S.sales.length||0)+1;savePortalData(PD);}
+      if(pidx>=0){const sid=CURRENT_STORE.id,sc=(S.sales.length||0)+1;updatePD(d=>{const s=d.stores.find(x=>x.id===sid);if(s)s.salesCount=sc;});}
       S.qsScreen=false;S.qsProduct=null;S.qsQty=1;S._newProductId=null;
       renderApp();
       // Toast
@@ -2149,7 +2267,7 @@ function pgStoreName(){
     if(!confirm("تغيير اسم المتجر إلى '"+newName+"'؟"))return;
     // Update in PD and save to cloud
     const idx=PD.stores.findIndex(x=>x.id===CURRENT_STORE.id);
-    if(idx>=0){PD.stores[idx].name=newName;await savePortalData(PD);}
+    if(idx>=0){const sid=CURRENT_STORE.id;await updatePD(d=>{const s=d.stores.find(x=>x.id===sid);if(s)s.name=newName;});}
     CURRENT_STORE.name=newName;
     S._newStoreName=null;
     renderApp();
@@ -2550,8 +2668,8 @@ async function saToggleBan(id){
   if(!s)return;
   const action=s.banned?"رفع الحظر عن":"حظر";
   if(!confirm(action+" متجر '"+s.name+"'؟"))return;
-  s.banned=!s.banned;
-  await savePortalData(PD);
+  const nb=!s.banned;
+  await updatePD(d=>{const x=d.stores.find(y=>y.id===id);if(x)x.banned=nb;});
   renderSAPanel();
   renderStores();
 }
@@ -2559,12 +2677,14 @@ async function saToggleBan(id){
 async function saApproveStore(id){
   const req=(PD.pendingStores||[]).find(x=>x.id===id);
   if(!req)return;
-  // Move from pending to approved stores
-  PD.pendingStores=(PD.pendingStores||[]).filter(x=>x.id!==id);
+  // Move from pending to approved stores (على أحدث نسخة سحابية)
   const approved={...req,status:"approved",approvedAt:new Date().toLocaleDateString("ar-IQ")};
   delete approved.requestedAt;
-  PD.stores.push(approved);
-  await savePortalData(PD);
+  const ok=await updatePD(d=>{
+    d.pendingStores=d.pendingStores.filter(x=>x.id!==id);
+    if(!d.stores.some(x=>x.id===id))d.stores.push(approved);
+  },d=>d.stores.some(x=>x.id===id));
+  if(!ok){alert("⚠️ تعذّر الحفظ في السحابة — تحقق من الإنترنت وأعد المحاولة");renderSAPanel();return;}
   renderSAPanel();
   renderStores();
   updateStats();
@@ -2575,8 +2695,7 @@ async function saRejectStore(id){
   const req=(PD.pendingStores||[]).find(x=>x.id===id);
   if(!req)return;
   if(!confirm("رفض طلب '"+req.name+"'؟"))return;
-  PD.pendingStores=(PD.pendingStores||[]).filter(x=>x.id!==id);
-  await savePortalData(PD);
+  await updatePD(d=>{d.pendingStores=d.pendingStores.filter(x=>x.id!==id);});
   renderSAPanel();
 }
 
@@ -2585,8 +2704,7 @@ async function saChangePlan(id){
   const plans=Object.keys(PLANS);
   const cur=plans.indexOf(s.plan);
   const next=plans[(cur+1)%plans.length];
-  s.plan=next;
-  await savePortalData(PD);
+  await updatePD(d=>{const x=d.stores.find(y=>y.id===id);if(x)x.plan=next;});
   renderSAPanel();
   renderStores();
 }
@@ -2602,12 +2720,11 @@ async function saDeleteStore(id){
   if(!s)return;
   if(!confirm("حذف متجر '"+s.name+"' نهائياً؟\nسيتم حذف جميع بياناته ولا يمكن التراجع!"))return;
   // Remove from stores list
-  PD.stores=PD.stores.filter(x=>x.id!==id);
   // Phone NOT blocked — owner can re-register a new store
   // Clear localStorage data for this store
   const keys=["prod","sale","note","debt","supp","exp","ret","po","users","inv_n","inv_periods"];
   keys.forEach(k=>localStorage.removeItem("vs_"+k+"_"+id));
-  await savePortalData(PD);
+  await updatePD(d=>{d.stores=d.stores.filter(x=>x.id!==id);delete d.users[id];});
   renderSAPanel();
   renderStores();
   updateStats();
@@ -2615,8 +2732,7 @@ async function saDeleteStore(id){
 
 async function saDeleteAllDemoStores(){
   if(!confirm("حذف المتاجر التجريبية (demo1, demo2, demo3)؟"))return;
-  PD.stores=PD.stores.filter(s=>!s.id.startsWith("demo"));
-  await savePortalData(PD);
+  await updatePD(d=>{d.stores=d.stores.filter(s=>!s.id.startsWith("demo"));});
   renderSAPanel();
   renderStores();
   updateStats();
@@ -2653,7 +2769,7 @@ async function initPortal(){
     await loadPortalData();
   }catch(e){
     console.warn("فشل تهيئة البوابة:",e);
-    if(!isValidPD(PD))PD={stores:[],pendingStores:[]};
+    if(!isValidPD(PD))PD={stores:[],pendingStores:[],users:{}};
   }finally{
     document.getElementById("cloud-loading")?.remove();
     _portalReady=true;
@@ -2661,6 +2777,7 @@ async function initPortal(){
     renderStores();
     renderAuthCard();
     startCloudSync(); // بدء المزامنة التلقائية بين الأجهزة
+    flushOutbox();    // إعادة إرسال أي طلب لم يصل سابقاً
   }
 }
 
@@ -2672,24 +2789,23 @@ let _lastSyncHash="";
 
 function pdHash(d){
   // بصمة مختصرة للبيانات — للكشف عن التغيير بدون مقارنة كاملة
-  try{return String((d?.stores?.length||0))+"|"+(d?.pendingStores?.length||0)+"|"+(d?.stores?.map(s=>s.id+s.name+(s.productsCount||0)+(s.salesCount||0)).join(","));}
+  try{return JSON.stringify(d);}
   catch{return "";}
 }
 
 async function cloudSyncTick(){
   if(!CLOUD_ON)return; // لا معنى للـ polling بدون سحابة
   if(_cloudSaving)return; // لا تتعارض مع حفظ جارٍ
+  flushOutbox();
   try{
-    const r=await fetchTimeout(CLOUD_WORKER_URL+"?action=load",{},6000);
-    if(!r.ok)return;
-    const d=await r.json();
-    if(!isValidPD(d))return;
+    const d=await cloudFetch(6000);
+    if(_cloudSaving)return;
     const newHash=pdHash(d);
     if(newHash===_lastSyncHash)return; // لا يوجد تغيير — لا تفعل شيئاً
     _lastSyncHash=newHash;
     PD=d;
-    if(!PD.pendingStores)PD.pendingStores=[];
-    localStorage.setItem(PORTAL_KEY,JSON.stringify(PD));
+    saveLocalPD();
+    refreshStoreUsersFromPD();
     // تحديث الواجهة فقط لو المستخدم في الصفحة الرئيسية (مو داخل متجر)
     if(!CURRENT_STORE){
       updateStats();
